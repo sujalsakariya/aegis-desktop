@@ -1,0 +1,77 @@
+{
+  "name": "antivirus-desktop",
+  "version": "1.2.1",
+  "description": "Antivirus desktop application",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "dist:win": "npm run build && electron-builder --win --publish never",
+    "dist:mac": "npm run build && electron-builder --mac --publish never"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-react": "^6.1.1",
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.3.0",
+    "vite-plugin-electron": "^1.1.2",
+    "vite-plugin-electron-renderer": "^1.0.0"
+  },
+  "build": {
+    "appId": "com.aegis.desktop",
+    "productName": "Aegis",
+    "files": [
+      "dist/**",
+      "dist-electron/**"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "artifactName": "${productName}-Setup.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "compression": "maximum",
+    "electronLanguages": [
+      "en-US"
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "NSDesktopFolderUsageDescription": "Aegis scans your Desktop for threats.",
+        "NSDocumentsFolderUsageDescription": "Aegis scans your Documents for threats.",
+        "NSDownloadsFolderUsageDescription": "Aegis scans your Downloads for threats.",
+        "NSRemovableVolumesUsageDescription": "Aegis scans USB drives and other removable drives for threats when they are connected.",
+        "NSNetworkVolumesUsageDescription": "Aegis scans network drives only when you choose them for a custom scan."
+      }
+    },
+    "dmg": {
+      "artifactName": "${productName}-${version}-mac.${ext}",
+      "title": "Aegis ${version}"
+    }
+  }
+}
