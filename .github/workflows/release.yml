@@ -40,6 +40,20 @@ jobs:
           # No Apple / Windows code-signing certificate yet: do not look for one.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
+      # Launch the packaged Mac app for real: it must start, stay running and
+      # reach the live API. Fails the build instead of shipping a broken .dmg.
+      - name: Smoke test (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          APP=release/mac-universal/Aegis.app
+          codesign --verify --deep --strict "$APP" && echo "Signature OK (ad-hoc)"
+          lipo -archs "$APP/Contents/MacOS/Aegis"
+          "$APP/Contents/MacOS/Aegis" > app.log 2>&1 &
+          sleep 30
+          cat app.log
+          pgrep -f "Aegis.app/Contents/MacOS/Aegis" > /dev/null || { echo "Aegis exited during startup"; exit 1; }
+          echo "Aegis is running"
+          pkill -f "Aegis.app/Contents/MacOS/Aegis" || true
       - uses: actions/upload-artifact@v4
         with:
           name: installer-${{ matrix.os }}
