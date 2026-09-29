@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('licenseAPI', {
   saveProfile: (profile) => ipcRenderer.invoke('license:saveProfile', profile),
   login: (credentials) => ipcRenderer.invoke('license:login', credentials),
   keyLogin: (credentials) => ipcRenderer.invoke('license:keyLogin', credentials),
+  signUp: (input) => ipcRenderer.invoke('license:signUp', input),
   updateProfile: (profile) => ipcRenderer.invoke('license:updateProfile', profile),
   logout: () => ipcRenderer.invoke('license:logout'),
   onUpdate: (listener) => {

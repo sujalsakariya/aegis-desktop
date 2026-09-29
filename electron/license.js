@@ -341,12 +341,25 @@ export class LicenseManager {
    * and `activationError` says why.
    */
   async keyLogin(email, licenseKey) {
+    return this.#keySession('/api/auth/key-login', { email }, licenseKey, 'Could not log in.')
+  }
+
+  /**
+   * New customer, one step: their details and the licence key they bought. The
+   * server checks the key before creating the account, then activates it here.
+   */
+  async signUp({ username, name, email, phone }, licenseKey) {
+    return this.#keySession('/api/auth/signup', { username, name, email, phone }, licenseKey, 'Could not create your account.')
+  }
+
+  /** Opens a session with a licence key as proof and installs the licence it returns. */
+  async #keySession(endpoint, details, licenseKey, fallbackError) {
     const key = typeof licenseKey === 'string' ? licenseKey.trim().toUpperCase() : ''
     if (!KEY_PATTERN.test(key)) throw new Error('A licence key looks like AVP-XXXX-XXXX-XXXX-XXXX.')
     if (!PUBLIC_KEY) throw new Error('This build cannot verify licences because it has no licence public key.')
     const previous = this.#cache.account
     const id = machineId()
-    const body = await this.#postForSession('/api/auth/key-login', { email, licenseKey: key, ...deviceDetails(id) }, 'Could not log in.')
+    const body = await this.#postForSession(endpoint, { ...details, licenseKey: key, ...deviceDetails(id) }, fallbackError)
     const account = pickAccount(body.user)
     // Whatever licence this PC held belongs to the previous login; this one replaces it.
     if (this.#cache.licenseKey && (previous?.id !== account.id || this.#cache.licenseKey !== key)) await this.#clearLicense()

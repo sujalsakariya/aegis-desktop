@@ -32,7 +32,10 @@ function nameProblem(value) {
 // Same rule as the server: a 10-digit US number whose area code and exchange do not start with 0 or 1.
 function phoneProblem(value) {
   if (!value.trim()) return 'Enter your phone number.'
-  if (!/^[2-9]\d{2}[2-9]\d{6}$/.test(usDigits(value))) return 'Enter a 10-digit US phone number, e.g. (212) 555-0123.'
+  const d = usDigits(value)
+  if (d.length !== 10) return 'Enter a 10-digit US phone number, e.g. (212) 555-0123.'
+  if (/^[01]/.test(d)) return `US area codes never start with ${d[0]}. Check the first 3 digits, e.g. (212) 555-0123.`
+  if (/^[01]/.test(d.slice(3))) return `In a US number the 3 digits after the area code never start with ${d[3]} (you entered ${d.slice(3, 6)}). Check the number, e.g. (212) 555-0123.`
   return null
 }
 
@@ -43,17 +46,15 @@ function profileProblem(profile) {
   if (!username) return 'Choose a username.'
   if (!USERNAME_PATTERN.test(username)) return 'Use 3–24 letters, numbers, dots or underscores for the username, starting and ending with a letter or number.'
   if (!EMAIL_PATTERN.test(profile.email.trim())) return 'Enter a valid email address.'
-  return phoneProblem(profile.phone)
+  return phoneProblem(profile.phone) || keyProblem(profile.licenseKey)
 }
 
 const EMPTY_PROFILE = { name: '', username: '', email: '', phone: '', licenseKey: '' }
 
-/** First problem with the returning-customer form, or null. `withKey`: email + licence key, else email + username. */
-function loginProblem(profile, withKey) {
+/** First problem with the returning-customer form (email + licence key), or null. */
+function loginProblem(profile) {
   if (!EMAIL_PATTERN.test(profile.email.trim())) return 'Enter the email you registered with.'
-  if (withKey) return keyProblem(profile.licenseKey)
-  if (!USERNAME_PATTERN.test(profile.username.trim().toLowerCase())) return 'Enter the username you registered with.'
-  return null
+  return keyProblem(profile.licenseKey)
 }
 
 const STATE_COPY = {
@@ -93,10 +94,9 @@ function License({ state, toasts, onActivated, onSignOut }) {
   const { licenseStatus, setLicenseStatus, account, setAccount } = state
   const [profile, setProfile] = useState(EMPTY_PROFILE)
   const [profileError, setProfileError] = useState(null)
-  // 'new' registers with all four details; 'returning' logs in with email + licence
-  // key (any PC), or with email + username on the PC where the licence was last used.
+  // Both forms need the licence key. 'new' creates the account with all four
+  // details and activates the key in one step; 'returning' logs in with email + key.
   const [mode, setMode] = useState('new')
-  const [loginWithKey, setLoginWithKey] = useState(true)
   const [editing, setEditing] = useState(null)
   const [licenseKey, setLicenseKey] = useState('')
   const [busy, setBusy] = useState('')
@@ -126,38 +126,26 @@ function License({ state, toasts, onActivated, onSignOut }) {
   const saveProfile = async (event) => {
     event.preventDefault()
     const returning = mode === 'returning'
-    const withKey = returning && loginWithKey
-    const problem = returning ? loginProblem(profile, withKey) : profileProblem(profile)
+    const problem = returning ? loginProblem(profile) : profileProblem(profile)
     if (problem) {
       setProfileError(problem)
       return
     }
     setBusy('profile')
-    const username = profile.username.trim().toLowerCase()
     const email = profile.email.trim().toLowerCase()
-    const result = withKey
-      ? await api.license.keyLogin(email, profile.licenseKey.trim())
-      : returning
-        ? await api.license.login(email, username)
-        : await api.license.saveProfile({ name: profile.name.trim(), username, email, phone: profile.phone.trim() })
+    const key = profile.licenseKey.trim()
+    const result = returning
+      ? await api.license.keyLogin(email, key)
+      : await api.license.signUp({ name: profile.name.trim(), username: profile.username.trim().toLowerCase(), email, phone: profile.phone.trim() }, key)
     setBusy('')
     if (result.ok) {
-      const { restoredLicense, restoreNote, keyRequired, activationError, ...saved } = result.data || {}
+      const { restoredLicense, activationError, ...saved } = result.data || {}
       setAccount(saved)
       setProfile(EMPTY_PROFILE)
-      const name = saved.name || saved.username
       if (restoredLicense) {
-        await onActivated?.({ restored: true })
+        await onActivated?.({ restored: returning })
       } else if (activationError) {
         toasts.warn('Logged in, but the licence is not active here', activationError)
-      } else if (keyRequired) {
-        toasts.warn('Enter your licence key', 'Your licence was last used on another PC. Enter its key below to use it on this PC.')
-      } else if (restoreNote) {
-        toasts.warn('Your licence is on another PC', restoreNote)
-      } else if (returning) {
-        toasts.notify('Logged in', `Welcome back, ${name}. Enter your licence key to protect this PC.`)
-      } else {
-        toasts.notify('Details saved', `Thanks, ${name}. Now activate your licence key.`)
       }
     } else {
       setProfileError(result.error)
@@ -278,7 +266,7 @@ function License({ state, toasts, onActivated, onSignOut }) {
       )}
     </Card>
   ) : (
-    <Card title={mode === 'returning' ? 'Step 1 · Log in' : 'Step 1 · Your details'} subtitle="No password needed">
+    <Card title={mode === 'returning' ? 'Log in' : 'Create your account'} subtitle="No password needed">
       <div className="segmented" role="tablist" aria-label="Account">
         {[['new', 'New customer'], ['returning', 'I already have an account']].map(([key, label]) => (
           <button key={key} type="button" role="tab" aria-selected={mode === key} className={mode === key ? 'active' : ''} onClick={() => { setMode(key); setProfileError(null) }}>
@@ -303,41 +291,28 @@ function License({ state, toasts, onActivated, onSignOut }) {
           <label htmlFor="profile-email">Email</label>
           <input id="profile-email" className="input" type="email" autoComplete="email" required value={profile.email} onChange={setField('email')} placeholder="john@example.com" />
         </div>
-        {mode === 'returning' && (loginWithKey ? (
-          <div className="field">
-            <label htmlFor="profile-licence-key">Licence key</label>
-            <input id="profile-licence-key" className="input mono" required value={profile.licenseKey} onChange={setField('licenseKey')} placeholder="AVP-XXXX-XXXX-XXXX-XXXX" spellCheck="false" autoComplete="off" />
-          </div>
-        ) : (
-          <div className="field">
-            <label htmlFor="profile-username">Username</label>
-            <input id="profile-username" className="input" autoComplete="username" required value={profile.username} onChange={setField('username')} placeholder="e.g. john_pc" spellCheck="false" />
-          </div>
-        ))}
         {mode === 'new' && (
           <div className="field">
             <label htmlFor="profile-phone">Phone (US)</label>
             <input id="profile-phone" className="input" type="tel" autoComplete="tel" required value={profile.phone} onChange={setField('phone')} placeholder="(212) 555-0123" />
           </div>
         )}
+        <div className="field">
+          <label htmlFor="profile-licence-key">Licence key</label>
+          <input id="profile-licence-key" className="input mono" required value={profile.licenseKey} onChange={setField('licenseKey')} placeholder="AVP-XXXX-XXXX-XXXX-XXXX" spellCheck="false" autoComplete="off" />
+        </div>
         {profileError && <div className="form-error">{profileError}</div>}
         <button type="submit" className="btn btn-primary btn-sm" disabled={busy === 'profile'}>
+          <LicenseIcon size={15} />{' '}
           {mode === 'returning'
-            ? (busy === 'profile' ? 'Logging in…' : 'Log in')
-            : (busy === 'profile' ? 'Saving…' : 'Save and continue')}
+            ? (busy === 'profile' ? 'Logging in…' : 'Log in and protect this PC')
+            : (busy === 'profile' ? 'Activating and securing your PC…' : 'Activate and protect this PC')}
         </button>
-        {mode === 'returning' ? (
-          <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>
-            {loginWithKey
-              ? 'Your licence key is in your purchase email. It proves the licence is yours and turns on protection on this PC. '
-              : 'Works on the PC where you used Aegis before. On a new PC you will be asked for your licence key. '}
-            <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '2px 6px', fontSize: 12.5 }} onClick={() => { setLoginWithKey(!loginWithKey); setProfileError(null) }}>
-              {loginWithKey ? 'No licence yet? Log in with your username' : 'Log in with my licence key instead'}
-            </button>
-          </p>
-        ) : (
-          <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Registered before, on this or another PC? Choose “I already have an account”.</p>
-        )}
+        <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>
+          {mode === 'returning'
+            ? 'Enter the email you registered with and your licence key from your purchase email.'
+            : 'Your licence key is in your purchase email. Registered before, on this or another PC? Choose “I already have an account”.'}
+        </p>
       </form>
     </Card>
   )
@@ -378,12 +353,12 @@ function License({ state, toasts, onActivated, onSignOut }) {
           ) : (
             <div className="stack" style={{ gap: 10 }}>
               <p className="muted" style={{ fontSize: 13.5, lineHeight: 1.65 }}>
-                Enter your details, then the licence key from your purchase confirmation. Activating it turns on
+                Enter your details and the licence key from your purchase confirmation. Activating it turns on
                 real-time protection and runs a first scan of your PC.
               </p>
               <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.6 }}>
                 A licence key belongs to the first customer that activates it and works on one PC at a time. To move it to a new
-                PC, deactivate it here first, then enter the same email and username on the new PC.
+                PC, deactivate it here first, then log in on the new PC with your email and licence key.
               </p>
             </div>
           )}
@@ -392,8 +367,8 @@ function License({ state, toasts, onActivated, onSignOut }) {
         <div className="stack">
           {accountCard}
 
-          {!licensed && (
-            <Card title="Step 2 · Activate your licence" subtitle="Ties this device to a licence seat.">
+          {account && !licensed && (
+            <Card title="Activate your licence" subtitle="Ties this device to a licence seat.">
               <form className="stack" onSubmit={activate} style={{ gap: 14 }}>
                 <div className="field">
                   <label htmlFor="license-key">Licence key</label>
@@ -413,14 +388,12 @@ function License({ state, toasts, onActivated, onSignOut }) {
                     }}
                     placeholder="AVP-XXXX-XXXX-XXXX-XXXX"
                     spellCheck="false"
-                    disabled={!account}
                   />
                 </div>
                 {error && <div className="form-error">{error}</div>}
-                <button type="submit" className="btn btn-primary btn-sm" disabled={busy === 'activate' || !account}>
+                <button type="submit" className="btn btn-primary btn-sm" disabled={busy === 'activate'}>
                   <LicenseIcon size={15} /> {busy === 'activate' ? 'Activating and securing your PC…' : 'Activate and protect this PC'}
                 </button>
-                {!account && <p className="muted" style={{ fontSize: 12.5 }}>Enter your details first.</p>}
               </form>
             </Card>
           )}
@@ -430,7 +403,7 @@ function License({ state, toasts, onActivated, onSignOut }) {
       <ConfirmDialog
         open={confirmOff}
         title="Deactivate this device?"
-        body="The licence seat is released and protection turns off on this computer. You can then activate the same key on this PC, or on another PC registered with the same email and username. No other customer can use it."
+        body="The licence seat is released and protection turns off on this computer. You can then activate the same key on this PC, or on another PC by logging in there with your email and licence key. No other customer can use it."
         confirmLabel="Deactivate"
         onCancel={() => setConfirmOff(false)}
         onConfirm={() => {

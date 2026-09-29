@@ -319,6 +319,7 @@ function registerIpcHandlers() {
   ipcMain.handle('license:saveProfile', handler((profile) => licenseManager.saveProfile({ username: requireString(profile?.username, 'Username'), name: requireString(profile?.name, 'Name'), email: requireString(profile?.email, 'Email'), phone: requireString(profile?.phone, 'Phone') })))
   ipcMain.handle('license:login', handler((credentials) => licenseManager.saveProfile({ username: requireString(credentials?.username, 'Username'), email: requireString(credentials?.email, 'Email') })))
   ipcMain.handle('license:keyLogin', handler((credentials) => licenseManager.keyLogin(requireString(credentials?.email, 'Email'), requireString(credentials?.licenseKey, 'Licence key'))))
+  ipcMain.handle('license:signUp', handler((input) => licenseManager.signUp({ username: requireString(input?.username, 'Username'), name: requireString(input?.name, 'Name'), email: requireString(input?.email, 'Email'), phone: requireString(input?.phone, 'Phone') }, requireString(input?.licenseKey, 'Licence key'))))
   ipcMain.handle('license:updateProfile', handler((profile) => licenseManager.updateProfile({ name: requireString(profile?.name, 'Name'), phone: requireString(profile?.phone, 'Phone') })))
   ipcMain.handle('license:logout', handler(() => licenseManager.logout()))
   ipcMain.handle('license:activate', handler((licenseKey) => licenseManager.activate(requireString(licenseKey, 'License key'))))

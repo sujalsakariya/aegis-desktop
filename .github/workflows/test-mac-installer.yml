@@ -1,0 +1,22 @@
+# Runs the public one-line Mac installer on a clean GitHub Mac, exactly as a
+# customer would, and checks Aegis ends up in /Applications and starts.
+name: Test Mac installer
+
+on:
+  workflow_dispatch:
+
+jobs:
+  install:
+    runs-on: macos-latest
+    steps:
+      - name: Run the install command
+        run: curl -fsSL https://antivirus-backend-three.vercel.app/install-mac.sh | bash
+      - name: Check the app
+        run: |
+          APP=/Applications/Aegis.app
+          test -d "$APP"
+          defaults read "$APP/Contents/Info" CFBundleShortVersionString
+          xattr -l "$APP" | grep -q com.apple.quarantine && { echo "Still marked as downloaded"; exit 1; } || echo "No quarantine mark: opens without the warning"
+          spctl --assess --type execute -vv "$APP" || true
+          sleep 20
+          pgrep -f "Aegis.app/Contents/MacOS/Aegis" > /dev/null && echo "Aegis is running"

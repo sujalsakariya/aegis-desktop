@@ -60,6 +60,7 @@ export const license = {
   saveProfile: (profile) => call('licenseAPI', 'saveProfile', profile),
   login: (email, username) => call('licenseAPI', 'login', { email, username }),
   keyLogin: (email, licenseKey) => call('licenseAPI', 'keyLogin', { email, licenseKey }),
+  signUp: (profile, licenseKey) => call('licenseAPI', 'signUp', { ...profile, licenseKey }),
   updateProfile: (profile) => call('licenseAPI', 'updateProfile', profile),
   logout: () => call('licenseAPI', 'logout'),
   onUpdate: (listener) => subscribe('licenseAPI', listener),
