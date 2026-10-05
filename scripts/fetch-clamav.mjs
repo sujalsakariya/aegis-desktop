@@ -74,7 +74,9 @@ if (platform === 'win32') {
   // Keep each library under the versioned name the binaries ask for
   // (@rpath/libclamav.12.dylib), resolving the package's symlinks.
   for (const name of fs.readdirSync(path.join(libraries, 'lib'))) {
-    if (!/\.dylib$/.test(name)) continue
+    // Only the name the binaries load (libclamav.12.dylib); the other names are
+    // symlinks to the same file and would triple the size.
+    if (!/^lib[a-z_]+\.\d+\.dylib$/.test(name)) continue
     const full = path.join(libraries, 'lib', name)
     copy(fs.realpathSync(full), path.join(out, 'lib', name))
   }

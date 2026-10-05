@@ -41,6 +41,8 @@ try {
   if (engine.lookupHashes({ md5: '44d88612fea8a8f36de82e1278abb02f', size: 68 }) !== 'Eicar-Test-Signature') fail('hash index does not know EICAR')
   else console.log('hash index: ok')
 } catch (error) {
+  if (error.output) console.error(`freshclam output:
+${error.output}`)
   fail(error.message)
 } finally {
   engine.stop()

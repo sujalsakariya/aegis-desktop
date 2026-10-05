@@ -188,7 +188,11 @@ export class ClamEngine {
       output = `${error.stdout || ''}${error.stderr || ''}`
       // freshclam exits non-zero for "already up to date" in some versions; only fail without databases.
       await this.#readInfo()
-      if (!this.#info.ready) throw new Error(freshclamError(output) || 'Could not download the threat signatures. Check your internet connection and try again.')
+      if (!this.#info.ready) {
+        const failure = new Error(freshclamError(output) || 'Could not download the threat signatures. Check your internet connection and try again.')
+        failure.output = output
+        throw failure
+      }
     }
     const info = await this.#readInfo()
     const updated = info.version !== before
