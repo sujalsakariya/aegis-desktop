@@ -129,15 +129,20 @@ async function categoryDefinitions(env) {
         targets: [...new Set([temp, path.join(windir, 'Temp')])].map((root) => target(root, { minAgeMs: DAY, prune: true })) },
       { id: 'recycle', label: 'Recycle Bin', description: 'Files you deleted earlier. Emptying it cannot be undone, so check it first.', defaultOn: false, targets: recycleRoots },
       { id: 'browser', label: 'Browser caches', description: 'Cached web pages and images. Passwords, cookies, history and bookmarks are never touched.', defaultOn: true, browsers: true },
-      { id: 'crash', label: 'Crash reports and update leftovers', description: 'Crash dumps, Windows error reports and old Windows Update downloads.', defaultOn: true,
+      { id: 'crash', label: 'Crash reports', description: 'Crash dumps and error reports from your apps.', defaultOn: true,
         targets: [
           target(path.join(local, 'CrashDumps')),
           target(path.join(local, 'Microsoft', 'Windows', 'WER', 'ReportArchive'), { prune: true }),
           target(path.join(local, 'Microsoft', 'Windows', 'WER', 'ReportQueue'), { prune: true }),
-          target(path.join(programData, 'Microsoft', 'Windows', 'WER', 'ReportArchive'), { prune: true }),
-          target(path.join(programData, 'Microsoft', 'Windows', 'WER', 'ReportQueue'), { prune: true }),
+        ] },
+      // These belong to Windows: only an administrator can delete them, so
+      // cleaning them asks Windows for permission (one UAC prompt).
+      { id: 'system', label: 'Windows Update leftovers', description: 'Old Windows Update downloads and system error reports. Windows asks for your permission before these are removed.', defaultOn: true, elevated: true,
+        targets: [
           // An update in progress uses this folder, so only old downloads go.
           target(path.join(windir, 'SoftwareDistribution', 'Download'), { minAgeMs: 10 * DAY, prune: true }),
+          target(path.join(programData, 'Microsoft', 'Windows', 'WER', 'ReportArchive'), { prune: true }),
+          target(path.join(programData, 'Microsoft', 'Windows', 'WER', 'ReportQueue'), { prune: true }),
         ] },
       { id: 'thumbnails', label: 'Thumbnail cache', description: 'Picture previews File Explorer saves. Windows rebuilds them when needed.', defaultOn: true,
         targets: [target(path.join(local, 'Microsoft', 'Windows', 'Explorer'), { match: (name) => /^thumbcache_.*\.db$/i.test(name) })] },
@@ -168,6 +173,92 @@ function openBrowsersNote(names) {
   if (!names.length) return null
   const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0]
   return `Close ${list} to clean ${names.length > 1 ? 'their caches' : 'its cache'}.`
+}
+
+/** True if this user may write the file (and so delete it); nothing is changed. */
+async function canModify(file) {
+  try {
+    const handle = await fs.open(file, 'r+')
+    await handle.close()
+    return true
+  } catch { return false }
+}
+
+const psQuote = (value) => `'${String(value).replace(/'/g, "''")}'`
+
+/**
+ * PowerShell run with administrator rights for the Windows-owned folders.
+ * Deletes only files older than each target's age limit, never follows links
+ * or junctions, never leaves its root, pauses Windows Update (and BITS) while
+ * it works and starts them again, then writes { freedBytes, deleted, skipped }
+ * as JSON to resultPath. Exported for tests (which run it without elevation).
+ */
+export function buildElevatedScript({ targets, resultPath, manageServices = true }) {
+  const list = targets.map((t) => `@{ Root = ${psQuote(path.resolve(t.root))}; MinAgeDays = ${(t.minAgeMs || 0) / DAY} }`).join(', ')
+  return `
+$ErrorActionPreference = 'SilentlyContinue'
+$targets = @(${list})
+$result = @{ freedBytes = [int64]0; deleted = 0; skipped = 0 }
+$paused = @()
+if (${manageServices ? '$true' : '$false'}) {
+  foreach ($name in @('wuauserv', 'bits')) {
+    $service = Get-Service -Name $name
+    if ($service -and $service.Status -eq 'Running') { Stop-Service -Name $name -Force; $paused += $name }
+  }
+}
+function Clean-Folder($dir, $root, $cutoff) {
+  foreach ($item in @(Get-ChildItem -LiteralPath $dir -Force)) {
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+    if (-not $item.FullName.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { continue }
+    if ($item.PSIsContainer) {
+      $old = $item.LastWriteTime -lt $cutoff
+      Clean-Folder $item.FullName $root $cutoff
+      if ($old -and -not (Get-ChildItem -LiteralPath $item.FullName -Force)) { Remove-Item -LiteralPath $item.FullName -Force }
+    } elseif ($item.LastWriteTime -lt $cutoff) {
+      $size = $item.Length
+      Remove-Item -LiteralPath $item.FullName -Force
+      if (Test-Path -LiteralPath $item.FullName) { $result.skipped++ } else { $result.freedBytes += $size; $result.deleted++ }
+    }
+  }
+}
+try {
+  foreach ($t in $targets) {
+    if (Test-Path -LiteralPath $t.Root) { Clean-Folder $t.Root $t.Root ((Get-Date).AddDays(-$t.MinAgeDays)) }
+  }
+} finally {
+  foreach ($name in $paused) { Start-Service -Name $name }
+}
+$result | ConvertTo-Json -Compress | Set-Content -LiteralPath ${psQuote(resultPath)} -Encoding UTF8
+`
+}
+
+/**
+ * Runs buildElevatedScript as administrator. Windows shows its permission
+ * prompt; if the user declines, nothing is deleted and { declined: true } is
+ * returned. The script is passed inline (-EncodedCommand), never as a file
+ * another program could swap before it runs with admin rights.
+ */
+async function cleanElevated(targets) {
+  if (process.platform !== 'win32') return { declined: true }
+  const resultPath = path.join(os.tmpdir(), `aegis-clean-${process.pid}-${Date.now()}.json`)
+  await fs.rm(resultPath, { force: true })
+  const encoded = Buffer.from(buildElevatedScript({ targets, resultPath }), 'utf16le').toString('base64')
+  const launcher = `Start-Process -FilePath powershell.exe -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand','${encoded}'`
+  try {
+    await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', launcher], { windowsHide: true, timeout: 30 * 60 * 1000 })
+  } catch {
+    // Declined prompt, or PowerShell unavailable: nothing was deleted.
+    await fs.rm(resultPath, { force: true })
+    return { declined: true }
+  }
+  try {
+    const parsed = JSON.parse((await fs.readFile(resultPath, 'utf8')).replace(/^\uFEFF/, ''))
+    return { freedBytes: Number(parsed.freedBytes) || 0, deleted: Number(parsed.deleted) || 0, skipped: Number(parsed.skipped) || 0 }
+  } catch {
+    return { declined: true }
+  } finally {
+    await fs.rm(resultPath, { force: true })
+  }
 }
 
 function isInside(root, candidate) {
@@ -207,7 +298,7 @@ export class Cleaner {
   }
 
   /** Every file under `t.root` that may be deleted, with its size. Missing or unreadable folders give nothing. */
-  async #collect(t, limit) {
+  async #collect(t, limit, { deletableOnly = false } = {}) {
     const files = []
     const dirs = []
     const now = Date.now()
@@ -232,6 +323,9 @@ export class Cleaner {
         let stats
         try { stats = await fs.lstat(full) } catch { continue }
         if (t.minAgeMs && now - stats.mtimeMs < t.minAgeMs) continue
+        // Opening for writing changes nothing; it fails for files owned by the
+        // system or locked by a program, which a clean would only skip.
+        if (deletableOnly && !stats.isSymbolicLink() && !(await canModify(full))) continue
         files.push({ path: full, size: stats.isSymbolicLink() ? 0 : stats.size })
         if (files.length >= limit) break
       }
@@ -239,11 +333,11 @@ export class Cleaner {
     return { files, dirs }
   }
 
-  async #collectTargets(targets) {
+  async #collectTargets(targets, options) {
     let bytes = 0
     let count = 0
     for (const t of targets) {
-      const { files } = await this.#collect(t, MAX_FILES_PER_CATEGORY - count)
+      const { files } = await this.#collect(t, MAX_FILES_PER_CATEGORY - count, options)
       for (const file of files) bytes += file.size
       count += files.length
       if (count >= MAX_FILES_PER_CATEGORY) break
@@ -264,7 +358,7 @@ export class Cleaner {
           const parts = []
           for (const browser of await browsers(this.#env)) {
             if (!browser.targets.length) continue
-            const measured = await this.#collectTargets(browser.targets)
+            const measured = await this.#collectTargets(browser.targets, { deletableOnly: process.platform === 'win32' })
             if (!measured.files) continue
             parts.push({ name: browser.name, ...measured, running: browser.processes.some((name) => running.has(name)) })
           }
@@ -278,8 +372,8 @@ export class Cleaner {
           })
           continue
         }
-        const measured = await this.#collectTargets(definition.targets)
-        categories.push({ id: definition.id, label: definition.label, description: definition.description, defaultOn: definition.defaultOn, ...measured, note: null })
+        const measured = await this.#collectTargets(definition.targets, { deletableOnly: process.platform === 'win32' && !definition.elevated })
+        categories.push({ id: definition.id, label: definition.label, description: definition.description, defaultOn: definition.defaultOn, elevated: Boolean(definition.elevated), ...measured, note: null })
       }
       const analysis = { at: new Date().toISOString(), categories, totalBytes: categories.reduce((sum, c) => sum + c.bytes, 0), cancelled: this.#cancelled }
       this.#finish({ analysis })
@@ -313,9 +407,15 @@ export class Cleaner {
           }
         }
         const summary = { freedBytes: 0, deleted: 0, skipped: 0 }
-        for (const t of targets) {
-          if (this.#cancelled) break
-          await this.#cleanTarget(t, summary)
+        if (definition.elevated) {
+          const elevated = await cleanElevated(targets)
+          if (elevated.declined) result.elevationDeclined = true
+          else Object.assign(summary, elevated)
+        } else {
+          for (const t of targets) {
+            if (this.#cancelled) break
+            await this.#cleanTarget(t, summary)
+          }
         }
         result.categories[definition.id] = summary
         result.freedBytes += summary.freedBytes

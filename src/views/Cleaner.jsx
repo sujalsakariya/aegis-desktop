@@ -43,6 +43,7 @@ function Cleaner({ state, toasts, onNavigate }) {
   const chosenBytes = chosen.reduce((sum, c) => sum + c.bytes, 0)
   const chosenFiles = chosen.reduce((sum, c) => sum + c.files, 0)
   const emptiesBin = chosen.some((c) => c.id === 'recycle')
+  const needsAdmin = chosen.some((c) => c.elevated)
 
   const toggle = (id) => {
     const next = new Set(selected)
@@ -63,6 +64,7 @@ function Cleaner({ state, toasts, onNavigate }) {
       r.freedBytes ? `Freed ${formatBytes(r.freedBytes)}` : 'Nothing could be removed',
       `${formatCount(r.deleted)} file(s) removed${r.skipped ? `, ${formatCount(r.skipped)} skipped because they are in use` : ''}.`,
     )
+    if (r.elevationDeclined) toasts.warn('Windows Update leftovers were skipped', 'Windows did not get permission to remove them. Clean again and choose Yes when Windows asks.')
     state.refreshHistory?.()
     await analyze()
   }
@@ -138,7 +140,7 @@ function Cleaner({ state, toasts, onNavigate }) {
                     onChange={() => toggle(category.id)}
                   />
                   <div className="main-cell">
-                    <strong>{category.label}</strong>
+                    <strong>{category.label}{category.elevated && !empty && <span className="cleaner-admin">Needs administrator</span>}</strong>
                     <span className="cleaner-desc">{category.description}</span>
                     {category.parts?.length > 0 && (
                       <span className="cleaner-parts">
@@ -184,7 +186,7 @@ function Cleaner({ state, toasts, onNavigate }) {
       <ConfirmDialog
         open={confirm}
         title={`Remove ${formatBytes(chosenBytes)} of junk?`}
-        body={`${chosen.map((c) => c.label).join(', ')} will be cleaned. Removed files cannot be restored.${emptiesBin ? ' This empties the Recycle Bin / Trash, so anything you deleted earlier will be gone for good.' : ''}`}
+        body={`${chosen.map((c) => c.label).join(', ')} will be cleaned. Removed files cannot be restored.${emptiesBin ? ' This empties the Recycle Bin / Trash, so anything you deleted earlier will be gone for good.' : ''}${needsAdmin ? ' Windows will then ask for permission to remove the Windows Update leftovers.' : ''}`}
         confirmLabel="Clean now"
         onCancel={() => setConfirm(false)}
         onConfirm={clean}
