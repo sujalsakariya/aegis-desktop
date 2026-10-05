@@ -102,38 +102,12 @@ export function KeyValue({ label, children }) {
  * shows that label instead ("Not scanned"), and `busy` makes it spin while the
  * first scan runs.
  */
-/** A small score gauge for one part of the protection (dashboard meters). */
-export function Meter({ label, score, tone, detail, actionLabel, onAction }) {
-  const radius = 26
-  const circumference = 2 * Math.PI * radius
-  const value = score === null ? 0 : Math.max(0, Math.min(100, score))
-  const stroke = tone === 'bad' ? 'var(--danger)' : tone === 'warn' ? 'var(--warn-dot)' : 'var(--brand-a)'
-  return (
-    <div className={`meter meter-${tone}`}>
-      <div className="meter-gauge" role="img" aria-label={score === null ? `${label}: not rated yet` : `${label}: ${value} out of 100`}>
-        <svg viewBox="0 0 64 64" aria-hidden="true">
-          <circle className="track" cx="32" cy="32" r={radius} />
-          {score !== null && (
-            <circle className="arc" cx="32" cy="32" r={radius} style={{ stroke }} strokeDasharray={circumference} strokeDashoffset={circumference * (1 - value / 100)} />
-          )}
-        </svg>
-        <strong>{score === null ? '—' : value}</strong>
-      </div>
-      <div className="meter-copy">
-        <span className="meter-label">{label}</span>
-        <span className="meter-detail">{detail}</span>
-        {actionLabel && <button type="button" className="btn btn-ghost btn-sm meter-action" onClick={onAction}>{actionLabel}</button>}
-      </div>
-    </div>
-  )
-}
-
-export function Shield({ score, tone = 'ok', pending = null, busy = false }) {
+export function Shield({ score, tone = 'ok', pending = null, busy = false, label = 'Score', size = '' }) {
   const radius = 56
   const circumference = 2 * Math.PI * radius
   if (pending) {
     return (
-      <div className={`shield shield-pending${busy ? ' is-busy' : ''}`} role="img" aria-label={pending}>
+      <div className={`shield shield-pending${busy ? ' is-busy' : ''}${size ? ` shield-${size}` : ''}`} role="img" aria-label={pending}>
         <svg viewBox="0 0 132 132" aria-hidden="true">
           <circle className="track" cx="66" cy="66" r={radius} />
           {busy && <circle className="arc" cx="66" cy="66" r={radius} style={{ stroke: 'var(--brand-a)' }} strokeDasharray={`${circumference * 0.25} ${circumference}`} />}
@@ -150,7 +124,7 @@ export function Shield({ score, tone = 'ok', pending = null, busy = false }) {
   const stroke = tone === 'bad' ? 'var(--danger)' : tone === 'warn' ? 'var(--warn-dot)' : 'var(--brand-a)'
 
   return (
-    <div className="shield">
+    <div className={`shield${size ? ` shield-${size}` : ''}`} role="img" aria-label={`${label}: ${clamped} out of 100`}>
       <svg viewBox="0 0 132 132" aria-hidden="true">
         <circle className="track" cx="66" cy="66" r={radius} />
         <circle
@@ -165,7 +139,7 @@ export function Shield({ score, tone = 'ok', pending = null, busy = false }) {
       </svg>
       <div className="inner">
         <strong>{clamped}</strong>
-        <span>Score</span>
+        <span>{label}</span>
       </div>
     </div>
   )

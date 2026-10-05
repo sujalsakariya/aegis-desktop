@@ -99,6 +99,11 @@ const METERS = [
   { id: 'cleanliness', label: 'PC cleanliness', weight: 10 },
 ]
 
+/** The security score: every meter except PC cleanliness, which is shown as "PC health". */
+export function securityScore(meters) {
+  return overallScore(meters.filter((meter) => meter.id !== 'cleanliness'))
+}
+
 /** Weighted average of the meters that have a score; null if none do. */
 export function overallScore(meters) {
   const scored = meters.filter((meter) => meter.score !== null)

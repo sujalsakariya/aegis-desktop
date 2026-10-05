@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
-import { Banner, Card, Empty, Meter, Shield, Stat } from '../components/ui'
+import { Banner, Card, Empty, Shield } from '../components/ui'
+import { AlertIcon, CleanerIcon, ProtectionIcon, QuarantineIcon, ScanIcon, UpdatesIcon, LockIcon } from '../components/icons'
 import { isLicensed } from '../lib/licensing'
-import { computeMeters, overallScore, toneOf } from '../lib/meters'
+import { computeMeters, securityScore, toneOf } from '../lib/meters'
 import * as api from '../lib/bridge'
 import { formatCount, formatDate, formatDuration, shortPath, timeAgo, titleCase } from '../lib/format'
 
-/** Button text for each meter's fix-it action. */
-const ACTION_LABELS = { realtime: 'Turn on', scan: 'Scan now', updates: 'Update', protection: 'Review settings', cleaner: 'Check for junk', license: 'Activate' }
+/** Button text for each check's fix-it action. */
+const ACTION_LABELS = { realtime: 'Turn on', scan: 'Scan now', updates: 'Update', protection: 'Review', cleaner: 'Check now', license: 'Activate' }
+const CHECK_ICONS = { realtime: ProtectionIcon, scanning: ScanIcon, signatures: UpdatesIcon, device: LockIcon }
+const STATUS_TEXT = { ok: 'Good', warn: 'Needs attention', bad: 'At risk', off: 'Not rated' }
 
 /** Recent activity entries shown before "Show more". */
 const ACTIVITY_PREVIEW = 5
@@ -31,12 +34,26 @@ function ActivityChart({ data }) {
   )
 }
 
+/** One stat tile with an icon. */
+function Tile({ icon: Icon, tone = '', label, value, note }) {
+  return (
+    <div className={`dash-tile ${tone}`}>
+      <span className="dash-tile-icon"><Icon size={18} /></span>
+      <div>
+        <span className="dash-tile-label">{label}</span>
+        <strong className="dash-tile-value">{value}</strong>
+        <span className="dash-tile-note">{note}</span>
+      </div>
+    </div>
+  )
+}
+
 function Dashboard({ state, onQuickScan, onToggleRealtime, onNavigate, firstScan }) {
   const { settings, realtimeStatus, usbStatus, licenseStatus, scannerStatus, quarantineItems, historySummary } = state
   const [showAllActivity, setShowAllActivity] = useState(false)
   const [cleaner, setCleaner] = useState({})
 
-  // PC Cleaner's last analysis feeds the "PC cleanliness" meter.
+  // PC Cleaner's last analysis feeds the PC health score.
   useEffect(() => {
     let alive = true
     api.cleaner.status().then((result) => { if (alive && result.ok && result.data) setCleaner(result.data) })
@@ -63,13 +80,10 @@ function Dashboard({ state, onQuickScan, onToggleRealtime, onNavigate, firstScan
   const hasScanHistory = daily.some((day) => day.filesScanned > 0 || day.threats > 0)
 
   const lastScanAt = scannerStatus?.startedAt ? new Date(scannerStatus.startedAt).toISOString() : lastScan?.finishedAt || null
-  // The score only means something once this PC has actually been scanned, so
-  // until a full device scan completes the ring asks for a scan instead.
+  // The score only means something once this PC has actually been scanned, and
+  // only scans finished after the licence was activated count; without a licence
+  // nothing is checked, so no score is shown at all.
   const lastCompletedScanAt = historySummary?.lastCompletedScanAt || null
-  // Once a licence is activated (or restored), only a scan finished after that
-  // counts: otherwise the score would jump up without anything being checked.
-  // Without a licence (never activated, or logged out) nothing is being checked,
-  // so no score is shown at all; the ring asks for a licence instead.
   const activatedAt = licensed ? licenseStatus?.activatedAt : null
   const hasScanned = licensed && Boolean(lastCompletedScanAt) && (!activatedAt || Date.parse(lastCompletedScanAt) >= Date.parse(activatedAt))
   const needsRescan = licensed && !hasScanned && Boolean(lastCompletedScanAt)
@@ -83,7 +97,9 @@ function Dashboard({ state, onQuickScan, onToggleRealtime, onNavigate, firstScan
     lastScanAt: hasScanned ? lastCompletedScanAt : null,
     cleaner,
   })
-  const score = overallScore(meters) ?? 0
+  const checks = meters.filter((meter) => meter.id !== 'cleanliness')
+  const health = meters.find((meter) => meter.id === 'cleanliness')
+  const score = securityScore(meters) ?? 0
   const noSignatures = !state.definitionInfo?.count
   const tone = toneOf(score)
   const pending = hasScanned ? null : !licensed ? 'No licence' : scanning ? 'Scanning' : needsRescan ? 'Scan needed' : 'Not scanned'
@@ -100,22 +116,34 @@ function Dashboard({ state, onQuickScan, onToggleRealtime, onNavigate, firstScan
         : noSignatures
           ? 'Download the threat signatures, then scan your device.'
           : needsRescan
-            ? 'Scan your device to update your protection score.'
-            : 'Scan your device to see your protection score.'
-    : !licensed
-    ? 'Your computer is not protected.'
+            ? 'Scan your device to update your security score.'
+            : 'Scan your device to see your security score.'
     : scanning
       ? 'A scan is running right now.'
-      : noSignatures
-        ? 'Download the threat signatures to finish protecting your device.'
-        : tone === 'ok'
-        ? 'Your Device is in good condition.'
+      : tone === 'ok'
+        ? 'Your device is well protected.'
         : tone === 'warn'
           ? 'A few things need your attention.'
           : 'Your protection is incomplete.'
 
+  const lede = !hasScanned && !licensed
+    ? 'Aegis can scan and watch this computer once you activate your licence key.'
+    : !hasScanned && scanning
+      ? 'Your security score appears when this first scan finishes. You can keep using your computer.'
+      : !hasScanned && needsRescan
+        ? 'Your licence is active. Run a scan so the score reflects this computer as it is now.'
+        : !hasScanned
+          ? 'A quick scan checks Downloads, Desktop, Documents and startup items, then shows how well this computer is protected.'
+          : noSignatures
+            ? 'No threat signatures are installed, so threats cannot be recognised yet.'
+            : realtimeOn
+              ? 'Real-time protection is watching your Downloads, Desktop and Documents folders.'
+              : 'Real-time protection is off, so new files are not checked as they arrive.'
+
+  const healthTone = toneOf(health.score)
+
   return (
-    <div className="view stack">
+    <div className="view stack dashboard">
       {!licensed && licenseStatus?.state !== 'checking' && (
         <Banner tone="bad">
           <span className="dot bad" />
@@ -139,93 +167,93 @@ function Dashboard({ state, onQuickScan, onToggleRealtime, onNavigate, firstScan
           <span className="dot ok" />
           <p>
             <strong>Welcome to Aegis — running your first scan.</strong> Checking Downloads, Desktop, Documents and startup
-            items. {formatCount(scannerStatus.filesScanned)} files checked so far. You can keep using your PC.
+            items. {formatCount(scannerStatus.filesScanned)} files checked so far. You can keep using your computer.
           </p>
           <span className="spacer" />
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => onNavigate?.('scan')}>View details</button>
         </Banner>
       )}
 
-      <section className="card">
-        <div className="shield-wrap">
-          <Shield score={score} tone={tone} pending={pending} busy={scanning && !hasScanned} />
-          <div className="shield-copy">
+      {/* The two scores that matter: security, and how clean the PC is. */}
+      <section className={`dash-hero tone-${pending ? 'off' : tone}`}>
+        <div className="dash-hero-main">
+          <Shield score={score} tone={tone} pending={pending} busy={scanning && !hasScanned} label="Security" size="lg" />
+          <div className="dash-hero-copy">
+            <span className="dash-eyebrow">Security score</span>
             <h2>{headline}</h2>
-            <p>
-              {!hasScanned && !licensed
-                ? 'Your protection score appears after your first scan. Aegis can scan this PC once you enter your details and activate your licence key.'
-                : !hasScanned && scanning
-                  ? 'Your protection score will appear when this first scan finishes. You can keep using your PC.'
-                  : !hasScanned && !noSignatures && needsRescan
-                    ? 'Your licence is active. Run a scan so your score reflects this PC as it is now, with your licence protecting it.'
-                  : !hasScanned && !noSignatures
-                    ? 'Aegis has not checked this PC yet. A quick scan checks Downloads, Desktop, Documents and startup items, and then shows how well this PC is protected.'
-                : !licensed
-                ? 'Aegis cannot scan or watch files until a licence is activated on this device. Enter your details and activate your licence key to protect it.'
-                : noSignatures
-                  ? 'No threat signatures are installed, so scans and real-time protection cannot recognise any threat yet.'
-                  : realtimeOn
-                  ? 'Real-time protection is watching your Downloads, Desktop and Documents folders.'
-                  : 'Real-time protection is off, so new files are not being checked as they arrive.'}
-            </p>
+            <p>{lede}</p>
             <div className="row wrap">
               {licensed ? (
                 <>
-                  <button type="button" className="btn btn-primary btn-sm" onClick={onQuickScan} disabled={scanning}>
-                    {scanning ? 'Scan in progress' : hasScanned ? 'Run a quick scan' : 'Scan my device'}
+                  <button type="button" className="btn btn-primary" onClick={onQuickScan} disabled={scanning}>
+                    <ScanIcon size={16} /> {scanning ? 'Scan in progress' : hasScanned ? 'Run a quick scan' : 'Scan my device'}
                   </button>
                   {noSignatures ? (
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => onNavigate?.('updates')}>Get threat signatures</button>
+                    <button type="button" className="btn btn-ghost" onClick={() => onNavigate?.('updates')}>Get threat signatures</button>
                   ) : (
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={onToggleRealtime}>
+                    <button type="button" className="btn btn-ghost" onClick={onToggleRealtime}>
                       {realtimeOn ? 'Pause real-time protection' : 'Turn on real-time protection'}
                     </button>
                   )}
                 </>
               ) : (
-                <button type="button" className="btn btn-primary btn-sm" onClick={() => onNavigate?.('license')}>
-                  Activate a licence
-                </button>
+                <button type="button" className="btn btn-primary" onClick={() => onNavigate?.('license')}>Activate a licence</button>
               )}
             </div>
           </div>
         </div>
+
+        <div className="dash-hero-health">
+          <Shield
+            score={health.score ?? 0}
+            tone={healthTone}
+            pending={health.score === null ? (licensed ? 'Not checked' : 'No licence') : null}
+            label="Health"
+            size="md"
+          />
+          <span className="dash-eyebrow">PC health</span>
+          <strong className="dash-health-title">{health.score === null ? 'Not checked yet' : healthTone === 'ok' ? 'Clean and tidy' : 'Junk is building up'}</strong>
+          <span className="dash-health-detail">{health.detail}</span>
+          {licensed && (
+            <button type="button" className={`btn btn-sm ${health.action ? 'btn-primary' : 'btn-ghost'}`} onClick={() => onNavigate?.('cleaner')}>
+              <CleanerIcon size={14} /> {health.score === null ? 'Check for junk' : health.action ? 'Clean up' : 'Open PC Cleaner'}
+            </button>
+          )}
+        </div>
       </section>
 
-
-      <Card title="Protection breakdown" subtitle="Each part of your protection, scored out of 100. The overall score combines them.">
-        <div className="meter-grid">
-          {meters.map((meter) => (
-            <Meter
-              key={meter.id}
-              label={meter.label}
-              score={meter.score}
-              tone={toneOf(meter.score)}
-              detail={meter.detail}
-              actionLabel={meter.action ? ACTION_LABELS[meter.action] : null}
-              onAction={() => runAction(meter.action)}
-            />
-          ))}
+      <Card title="Protection checklist" subtitle="What makes up your security score">
+        <div className="check-list">
+          {checks.map((check) => {
+            const Icon = CHECK_ICONS[check.id]
+            const checkTone = toneOf(check.score)
+            return (
+              <div className={`check-row tone-${checkTone}`} key={check.id}>
+                <span className="check-icon"><Icon size={18} /></span>
+                <div className="check-main">
+                  <strong>{check.label}</strong>
+                  <span>{check.detail}</span>
+                </div>
+                <div className="check-bar" aria-hidden="true"><i style={{ width: `${check.score ?? 0}%` }} /></div>
+                <span className="check-score">{check.score ?? '—'}</span>
+                <span className={`check-pill ${checkTone}`}>{STATUS_TEXT[checkTone]}</span>
+                <div className="check-action">
+                  {check.action && (
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => runAction(check.action)}>{ACTION_LABELS[check.action]}</button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
         </div>
       </Card>
 
-      <div className="grid four">
-        <Stat
-          label="Files scanned"
-          value={formatCount(filesScanned)}
-          note={scanning ? 'Updating live' : lastScanAt ? `Last scan ${timeAgo(lastScanAt)}` : 'No scan run yet'}
-        />
-        <Stat
-          label="Threats found"
-          value={formatCount(threats)}
-          note={threats === 0 ? 'Nothing detected' : 'Review quarantine'}
-        />
-        <Stat
-          label="In quarantine"
-          value={formatCount(quarantineItems.length)}
-          note={quarantineItems.length === 0 ? 'Nothing isolated' : 'Isolated and encrypted'}
-        />
-        <Stat
+      <div className="dash-tiles">
+        <Tile icon={ScanIcon} label="Files scanned" value={formatCount(filesScanned)} note={scanning ? 'Updating live' : lastScanAt ? `Last scan ${timeAgo(lastScanAt)}` : 'No scan run yet'} />
+        <Tile icon={AlertIcon} tone={threats ? 'bad' : ''} label="Threats found" value={formatCount(threats)} note={threats === 0 ? 'Nothing detected' : 'Review quarantine'} />
+        <Tile icon={QuarantineIcon} label="In quarantine" value={formatCount(quarantineItems.length)} note={quarantineItems.length === 0 ? 'Nothing isolated' : 'Isolated and encrypted'} />
+        <Tile
+          icon={UpdatesIcon}
           label="Threat signatures"
           value={state.definitionInfo?.count ? `${(state.definitionInfo.count / 1e6).toFixed(2)}M` : 'Not yet'}
           note={state.definitionInfo?.updatedAt ? `Updated ${timeAgo(state.definitionInfo.updatedAt)}` : 'Download them from Updates'}
@@ -239,67 +267,6 @@ function Dashboard({ state, onQuickScan, onToggleRealtime, onNavigate, firstScan
           ) : (
             <Empty glyph="◷" title="No scan history yet">
               Run a scan and the results recorded on this device will build up here.
-            </Empty>
-          )}
-        </Card>
-
-        <Card title="Protection modules">
-          <div className="list" style={{ margin: '-4px 0' }}>
-            {(licensed
-              ? [
-                  ['Licence', true, licenseStatus?.state === 'offline-grace' ? 'Offline grace period' : 'Active'],
-                  ['Real-time protection', realtimeOn, realtimeOn ? 'Watching file changes' : 'Currently off'],
-                  ['Scheduled scans', Boolean(settings?.automaticScanning), settings?.automaticScanning ? 'Allowed to run on schedule' : 'Manual scans only'],
-                  ['Removable drives', Boolean(usbStatus?.running), usbStatus?.supported === false ? 'Not supported on this platform' : usbStatus?.running ? `${usbStatus.devices?.length || 0} drive(s) seen` : 'Currently off'],
-                  ['Threat signatures', !noSignatures, noSignatures ? 'Not downloaded yet' : `${formatCount(state.definitionInfo.count)} signatures · version ${state.definitionInfo.version || '?'}`],
-                  ['Update checks', Boolean(settings?.updateChecks), settings?.updateChecks ? 'Signatures kept current' : 'Currently off'],
-                ]
-              : [
-                  ['Licence', false, 'Not activated'],
-                  ['Real-time protection', false, 'Needs an active licence'],
-                  ['Scheduled scans', false, 'Needs an active licence'],
-                  ['Removable drives', false, 'Needs an active licence'],
-                  ['Update checks', Boolean(settings?.updateChecks), settings?.updateChecks ? 'Signatures kept current' : 'Currently off'],
-                ]
-            ).map(([label, on, note]) => (
-              <div className="list-row" key={label} style={{ paddingInline: 0 }}>
-                <span className={`dot ${on ? 'ok' : licensed ? 'off' : 'bad'}`} />
-                <div className="main-cell">
-                  <strong>{label}</strong>
-                  <span className="path">{note}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
-
-      <div className="grid two">
-        <Card title="Recent activity" bodyClass="tight">
-          {events.length > 0 ? (
-            <>
-            <div className="list">
-              {visibleEvents.map((event, index) => (
-                <div className="event-row" key={`${event.at}-${index}`}>
-                  <span className={`dot ${event.tone}`} />
-                  <div className="body">
-                    <p>{event.text}</p>
-                    <div className="when">{timeAgo(event.at)}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {hiddenEvents > 0 && (
-              <div className="activity-more">
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowAllActivity((open) => !open)} aria-expanded={showAllActivity}>
-                  {showAllActivity ? 'Show less' : `Show more (${hiddenEvents})`}
-                </button>
-              </div>
-            )}
-            </>
-          ) : (
-            <Empty glyph="◷" title="Nothing recorded yet">
-              Scans, detections, drive activity and definition updates are logged here as they happen.
             </Empty>
           )}
         </Card>
@@ -333,6 +300,35 @@ function Dashboard({ state, onQuickScan, onToggleRealtime, onNavigate, firstScan
           )}
         </Card>
       </div>
+
+      <Card title="Recent activity" bodyClass="tight">
+        {events.length > 0 ? (
+          <>
+            <div className="list">
+              {visibleEvents.map((event, index) => (
+                <div className="event-row" key={`${event.at}-${index}`}>
+                  <span className={`dot ${event.tone}`} />
+                  <div className="body">
+                    <p>{event.text}</p>
+                    <div className="when">{timeAgo(event.at)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {hiddenEvents > 0 && (
+              <div className="activity-more">
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowAllActivity((open) => !open)} aria-expanded={showAllActivity}>
+                  {showAllActivity ? 'Show less' : `Show more (${hiddenEvents})`}
+                </button>
+              </div>
+            )}
+          </>
+        ) : (
+          <Empty glyph="◷" title="Nothing recorded yet">
+            Scans, detections, drive activity and signature updates are logged here as they happen.
+          </Empty>
+        )}
+      </Card>
     </div>
   )
 }
