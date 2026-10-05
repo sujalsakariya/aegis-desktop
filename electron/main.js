@@ -45,7 +45,8 @@ const engine = new ClamEngine({
   resourcesDir: app.isPackaged ? path.join(process.resourcesPath, 'engine') : path.join(app.getAppPath(), 'vendor', 'engine', process.platform),
   userData: app.getPath('userData'),
 })
-const scanner = new Scanner({ quarantine, engine })
+// The update manager is created below; the scanner only calls it once a scan starts.
+const scanner = new Scanner({ quarantine, engine, downloadSignatures: () => updates.updateDefinitions() })
 const realtime = new RealtimeProtection(scanner, quarantine)
 const settings = new SettingsStore()
 const scheduler = new ScanScheduler(scanner, app.getPath('userData'))
@@ -472,8 +473,7 @@ function registerHistoryRecorders() {
 
   updates.onEvent((event) => {
     broadcast('updates:update', event)
-    // Routine background checks that found nothing new are not worth a log line.
-    if (!(event.background && event.type === 'definitions-current')) history.recordUpdateEvent(event).catch(() => {})
+    history.recordUpdateEvent(event).catch(() => {})
     if (event.type === 'definitions-updated' && !windowInFocus()) {
       notify({ title: 'Threat definitions updated', body: `Version ${event.version}${Number.isFinite(event.signatureCount) ? ` · ${event.signatureCount.toLocaleString('en-US')} signatures` : ''}.` })
     }

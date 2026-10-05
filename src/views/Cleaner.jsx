@@ -95,7 +95,7 @@ function Cleaner({ state, toasts, onNavigate }) {
 
       <Card className="cleaner-hero">
         <div className="cleaner-summary">
-          <span className={`cleaner-badge ${busy ? 'busy' : ''}`}><CleanerIcon size={30} /></span>
+          <span className={`cleaner-badge ${busy ? 'busy' : ''}`}><CleanerIcon size={30} filled /></span>
           <div className="cleaner-figure">
             {busy ? (
               <>

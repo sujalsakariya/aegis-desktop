@@ -253,7 +253,7 @@ function License({ state, toasts, onActivated, onSignOut }) {
       ) : (
         <>
           <div className="row" style={{ alignItems: 'center', gap: 12, marginBottom: 12 }}>
-            <span className="account-chip" style={{ padding: 4 }}><span className="avatar"><UserIcon size={14} /></span></span>
+            <span className="account-chip" style={{ padding: 4 }}><span className="avatar"><UserIcon size={14} filled /></span></span>
             <div>
               <strong style={{ display: 'block' }}>{account.name || (account.username ? `@${account.username}` : account.email)}</strong>
               {account.username && <span className="muted" style={{ fontSize: 12.5 }}>@{account.username}</span>}
@@ -334,7 +334,7 @@ function License({ state, toasts, onActivated, onSignOut }) {
           {payload ? (
             <>
               <div className={`health-result ${licensed ? 'ok' : 'warn'}`} style={{ marginBottom: 12 }}>
-                <span className="badge">{licensed ? <CheckCircleIcon size={26} /> : <ClockIcon size={26} />}</span>
+                <span className="badge">{licensed ? <CheckCircleIcon size={26} filled /> : <ClockIcon size={26} filled />}</span>
                 <div>
                   <h3>{days === null ? 'Never expires' : `${days} day${days === 1 ? '' : 's'} left`}</h3>
                   <p>{payload.expiresAt ? `Valid until ${formatDate(payload.expiresAt)}` : 'Lifetime licence'}</p>

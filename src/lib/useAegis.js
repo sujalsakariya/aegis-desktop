@@ -164,10 +164,10 @@ export function useAegis(notifyError) {
       if (scheduleResult.ok) setScheduleInfo(scheduleResult.data)
     })
     const offUpdates = api.updates.onUpdate((event) => {
-      // Background checks that found nothing new are not logged by the main process either.
-      if (!(event?.background && event?.type === 'definitions-current')) {
-        setUpdateEvents((current) => [{ ...event, at: event?.at || new Date().toISOString() }, ...current].slice(0, 50))
-      }
+      // The main process saves the event (merging repeats), then the saved log is shown.
+      setTimeout(() => {
+        api.updates.log().then((result) => { if (result.ok && Array.isArray(result.data)) setUpdateEvents(result.data) })
+      }, 150)
       if (event?.type === 'definitions-updated') {
         api.scanner.definitions().then((result) => { if (result.ok) setDefinitionInfo(result.data) })
         api.history.summary().then((result) => { if (result.ok) setHistorySummary(result.data) })

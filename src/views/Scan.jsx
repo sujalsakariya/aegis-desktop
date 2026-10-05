@@ -89,7 +89,7 @@ function Scan({ state, toasts, onNavigate }) {
       {active && (
         <Card title="Scan in progress" subtitle={`${titleCase(status.mode)} scan`}>
           <div className="progress indeterminate"><i /></div>
-          <div className="scan-file">{status.preparing ? 'Starting the scanning engine (loading 3.6 million threat signatures, about 15 seconds)…' : status.currentFile ? shortPath(status.currentFile, 90) : 'Preparing…'}</div>
+          <div className="scan-file">{status.waitingForSignatures ? 'Downloading the threat signatures (about 110 MB, first time only). The scan starts by itself as soon as they are ready…' : status.preparing ? 'Starting the scanning engine (loading 3.6 million threat signatures, about 15 seconds)…' : status.currentFile ? shortPath(status.currentFile, 90) : 'Preparing…'}</div>
           {status.threatsDetected > 0 && (
             <p className="muted" style={{ fontSize: 12.5, marginTop: 10 }}>
               {formatCount(status.threatsDetected)} threat(s) found so far, {formatCount(quarantinedCount)} moved to quarantine.
@@ -187,7 +187,7 @@ function Scan({ state, toasts, onNavigate }) {
         <Card title="Last result">
           {status.threatsDetected > 0 ? (
             <div className="health-result warn">
-              <span className="badge"><AlertIcon size={26} /></span>
+              <span className="badge"><AlertIcon size={26} filled /></span>
               <div>
                 <h3>
                   {notQuarantined === 0
@@ -203,7 +203,7 @@ function Scan({ state, toasts, onNavigate }) {
             </div>
           ) : status.state === 'completed' && !state.definitionInfo?.count ? (
             <div className="health-result warn">
-              <span className="badge"><AlertIcon size={26} /></span>
+              <span className="badge"><AlertIcon size={26} filled /></span>
               <div>
                 <h3>Scan finished, but no threat definitions are installed</h3>
                 <p>
@@ -214,7 +214,7 @@ function Scan({ state, toasts, onNavigate }) {
             </div>
           ) : status.state === 'completed' ? (
             <div className="health-result ok">
-              <span className="badge"><CheckCircleIcon size={28} /></span>
+              <span className="badge"><CheckCircleIcon size={28} filled /></span>
               <div>
                 <h3>Your PC is in good condition</h3>
                 <p>
@@ -225,7 +225,7 @@ function Scan({ state, toasts, onNavigate }) {
             </div>
           ) : (
             <div className="health-result warn">
-              <span className="badge"><AlertIcon size={26} /></span>
+              <span className="badge"><AlertIcon size={26} filled /></span>
               <div>
                 <h3>The scan was cancelled</h3>
                 <p>{formatCount(status.filesScanned)} files were checked before it stopped. Run a full scan to confirm your PC is clean.</p>

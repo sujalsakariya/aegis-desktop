@@ -70,7 +70,7 @@ export class UpdateManager {
     const info = this.#engine.getInfo()
     const latest = await this.#engine.latestVersion()
     const installedVersion = info.ready ? label(info.version) : null
-    return {
+    const result = {
       version: latest ? label(latest.daily) : installedVersion,
       publishedAt: latest?.publishedAt || null,
       installedVersion,
@@ -78,6 +78,8 @@ export class UpdateManager {
       upToDate: Boolean(info.ready && (!latest || latest.daily <= info.version)),
       unknownLatest: !latest,
     }
+    this.#emit({ type: 'definitions-checked', version: result.version, installedVersion, upToDate: result.upToDate, unknownLatest: result.unknownLatest })
+    return result
   }
 
   /** Single-flight signature update; `force` is accepted for compatibility (freshclam decides). */

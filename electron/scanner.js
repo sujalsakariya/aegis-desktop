@@ -63,6 +63,7 @@ function createInitialStatus() {
 
 export class Scanner {
   #engine
+  #downloadSignatures
   #inflight = new Set()
   #engineFailures = 0
   #status = createInitialStatus()
@@ -77,9 +78,11 @@ export class Scanner {
   #policy = { exclusions: () => [], isAllowed: () => false }
   #isExcluded = () => false
 
-  constructor({ quarantine, engine } = {}) {
+  constructor({ quarantine, engine, downloadSignatures = null } = {}) {
     this.#quarantine = quarantine || null
     this.#engine = engine
+    // Goes through the update manager so the download is logged and recorded.
+    this.#downloadSignatures = downloadSignatures || (() => this.#engine.update())
   }
 
   async initialize() {
@@ -148,7 +151,8 @@ export class Scanner {
     if (this.#gate && !this.#gate()) throw new Error('An active licence is required to scan. Activate a licence on the Licence page.')
     if (this.#busy) throw new Error('A scan is already running')
     if (!this.#engine.isAvailable()) throw new Error('The scanning engine is missing from this installation. Reinstall Aegis.')
-    if (!this.#engine.getInfo().ready) throw new Error('Aegis is still downloading the threat signatures. Try again in a minute.')
+    // Without signatures yet (first run), the scan waits for the download and then starts by itself.
+    const waitingForSignatures = !this.#engine.getInfo().ready
     this.#busy = true
     let scanPaths
     try {
@@ -163,7 +167,7 @@ export class Scanner {
     this.#visitedDirectories.clear()
     this.#engineFailures = 0
     this.#isExcluded = this.exclusionMatcher()
-    this.#status = { ...createInitialStatus(), state: 'running', mode, source: SOURCES.includes(source) ? source : 'manual', startedAt: Date.now(), preparing: !this.#engine.isRunning() }
+    this.#status = { ...createInitialStatus(), state: 'running', mode, source: SOURCES.includes(source) ? source : 'manual', startedAt: Date.now(), preparing: waitingForSignatures || !this.#engine.isRunning(), waitingForSignatures }
     this.#running = this.#run(scanPaths).finally(() => { this.#running = null; this.#busy = false; this.#publish() })
     this.#publish()
     return this.#status
@@ -202,8 +206,15 @@ export class Scanner {
 
   async #run(paths) {
     try {
+      if (this.#status.waitingForSignatures) {
+        // Joins a download already in progress, or starts one.
+        await this.#downloadSignatures()
+        if (!this.#engine.getInfo().ready) throw new Error('The threat signatures could not be downloaded. Check your internet connection and try again.')
+        this.#status = { ...this.#status, waitingForSignatures: false }
+        this.#publish()
+      }
       // Loading 3.6 million signatures takes a few seconds the first time.
-      await this.#engine.ensureRunning()
+      if (!this.#cancelled) await this.#engine.ensureRunning()
       this.#status = { ...this.#status, preparing: false, startedAt: Date.now() }
       this.#publish()
       for (const scanPath of paths) {
@@ -215,7 +226,7 @@ export class Scanner {
     } catch (error) {
       this.#cancelled = true
       await Promise.allSettled(this.#inflight)
-      this.#status = { ...this.#status, state: 'failed', preparing: false, currentFile: null, error: error instanceof Error ? error.message : 'Scan failed', elapsedMs: Date.now() - this.#status.startedAt }
+      this.#status = { ...this.#status, state: 'failed', preparing: false, waitingForSignatures: false, currentFile: null, error: error instanceof Error ? error.message : 'Scan failed', elapsedMs: Date.now() - this.#status.startedAt }
     }
   }
 

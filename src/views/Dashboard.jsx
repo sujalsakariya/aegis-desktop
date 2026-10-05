@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Banner, Card, Empty, Shield } from '../components/ui'
+import { Banner, Card, CountUp, Empty, Shield } from '../components/ui'
 import { AlertIcon, CleanerIcon, ProtectionIcon, QuarantineIcon, ScanIcon, UpdatesIcon, LockIcon } from '../components/icons'
 import { isLicensed } from '../lib/licensing'
 import { computeMeters, securityScore, toneOf } from '../lib/meters'
@@ -38,7 +38,7 @@ function ActivityChart({ data }) {
 function Tile({ icon: Icon, tone = '', label, value, note }) {
   return (
     <div className={`dash-tile ${tone}`}>
-      <span className="dash-tile-icon"><Icon size={18} /></span>
+      <span className="dash-tile-icon"><Icon size={18} filled /></span>
       <div>
         <span className="dash-tile-label">{label}</span>
         <strong className="dash-tile-value">{value}</strong>
@@ -102,13 +102,41 @@ function Dashboard({ state, onQuickScan, onToggleRealtime, onNavigate, firstScan
   const score = securityScore(meters) ?? 0
   const noSignatures = !state.definitionInfo?.count
   const tone = toneOf(score)
-  const pending = hasScanned ? null : !licensed ? 'No licence' : scanning ? 'Scanning' : needsRescan ? 'Scan needed' : 'Not scanned'
+
+  // During a scan the ring climbs from 0 towards the score this device gets once
+  // the scan finishes, in step with how far the scan has got. Progress is
+  // measured against the files the last scan of the same kind checked; without
+  // one it follows a curve that slows down and never claims to be done.
+  let ringScore = score
+  let ringTone = tone
+  let ringCaption = null
+  if (scanning) {
+    const projected = securityScore(computeMeters({
+      licensed,
+      settings,
+      realtimeRunning: realtimeOn,
+      usbSupported: usbStatus?.supported !== false,
+      signatures: { count: state.definitionInfo?.count || 0, updatedAt: state.definitionInfo?.updatedAt || null },
+      lastScanAt: new Date().toISOString(),
+      cleaner,
+    })) ?? 0
+    const files = scannerStatus.filesScanned || 0
+    const expected = lastScan?.state === 'completed' && lastScan.mode === scannerStatus.mode && lastScan.filesScanned > 0 ? lastScan.filesScanned : 0
+    const waiting = scannerStatus.waitingForSignatures || scannerStatus.preparing
+    const progress = waiting ? 0 : expected ? Math.min(0.97, files / expected) : Math.min(0.95, 1 - Math.exp(-files / 1500))
+    ringScore = Math.round(projected * progress)
+    ringTone = 'scan'
+    ringCaption = scannerStatus.waitingForSignatures ? 'Downloading' : waiting ? 'Starting' : scannerStatus.state === 'paused' ? 'Paused' : `Scanning ${Math.round(progress * 100)}%`
+  }
+  const pending = hasScanned || scanning ? null : !licensed ? 'No licence' : needsRescan ? 'Scan needed' : 'Not scanned'
 
   // While a scan runs, its live counters are the truthful figure to show.
   const filesScanned = scanning ? scannerStatus.filesScanned : totals?.filesScanned ?? 0
   const threats = scanning ? scannerStatus.threatsDetected : totals?.threatsDetected ?? 0
 
-  const headline = !hasScanned
+  const headline = scanning
+    ? scannerStatus.waitingForSignatures ? 'Getting the threat signatures…' : 'Scanning your device…'
+    : !hasScanned
     ? !licensed
       ? 'Activate your licence, then scan your device.'
       : scanning
@@ -126,7 +154,11 @@ function Dashboard({ state, onQuickScan, onToggleRealtime, onNavigate, firstScan
           ? 'A few things need your attention.'
           : 'Your protection is incomplete.'
 
-  const lede = !hasScanned && !licensed
+  const lede = scanning
+    ? scannerStatus.waitingForSignatures
+      ? 'Downloading the threat signatures (about 110 MB, first time only). The scan starts by itself as soon as they are ready.'
+      : `${formatCount(scannerStatus.filesScanned || 0)} files checked so far. Your score fills in as the scan goes, and you can keep using your computer.`
+    : !hasScanned && !licensed
     ? 'Aegis can scan and watch this computer once you activate your licence key.'
     : !hasScanned && scanning
       ? 'Your security score appears when this first scan finishes. You can keep using your computer.'
@@ -175,9 +207,9 @@ function Dashboard({ state, onQuickScan, onToggleRealtime, onNavigate, firstScan
       )}
 
       {/* The two scores that matter: security, and how clean the PC is. */}
-      <section className={`dash-hero tone-${pending ? 'off' : tone}`}>
+      <section className={`dash-hero tone-${pending ? 'off' : ringTone}`}>
         <div className="dash-hero-main">
-          <Shield score={score} tone={tone} pending={pending} busy={scanning && !hasScanned} label="Security" size="lg" />
+          <Shield score={ringScore} tone={ringTone} pending={pending} caption={ringCaption} label="Security" size="lg" />
           <div className="dash-hero-copy">
             <span className="dash-eyebrow">Security score</span>
             <h2>{headline}</h2>
@@ -229,13 +261,13 @@ function Dashboard({ state, onQuickScan, onToggleRealtime, onNavigate, firstScan
             const checkTone = toneOf(check.score)
             return (
               <div className={`check-row tone-${checkTone}`} key={check.id}>
-                <span className="check-icon"><Icon size={18} /></span>
+                <span className="check-icon"><Icon size={18} filled /></span>
                 <div className="check-main">
                   <strong>{check.label}</strong>
                   <span>{check.detail}</span>
                 </div>
                 <div className="check-bar" aria-hidden="true"><i style={{ width: `${check.score ?? 0}%` }} /></div>
-                <span className="check-score">{check.score ?? '—'}</span>
+                <span className="check-score">{check.score == null ? '—' : <CountUp value={check.score} />}</span>
                 <span className={`check-pill ${checkTone}`}>{STATUS_TEXT[checkTone]}</span>
                 <div className="check-action">
                   {check.action && (
@@ -249,9 +281,9 @@ function Dashboard({ state, onQuickScan, onToggleRealtime, onNavigate, firstScan
       </Card>
 
       <div className="dash-tiles">
-        <Tile icon={ScanIcon} label="Files scanned" value={formatCount(filesScanned)} note={scanning ? 'Updating live' : lastScanAt ? `Last scan ${timeAgo(lastScanAt)}` : 'No scan run yet'} />
-        <Tile icon={AlertIcon} tone={threats ? 'bad' : ''} label="Threats found" value={formatCount(threats)} note={threats === 0 ? 'Nothing detected' : 'Review quarantine'} />
-        <Tile icon={QuarantineIcon} label="In quarantine" value={formatCount(quarantineItems.length)} note={quarantineItems.length === 0 ? 'Nothing isolated' : 'Isolated and encrypted'} />
+        <Tile icon={ScanIcon} label="Files scanned" value={<CountUp value={filesScanned} format={(n) => formatCount(Math.round(n))} />} note={scanning ? 'Updating live' : lastScanAt ? `Last scan ${timeAgo(lastScanAt)}` : 'No scan run yet'} />
+        <Tile icon={AlertIcon} tone={threats ? 'bad' : ''} label="Threats found" value={<CountUp value={threats} format={(n) => formatCount(Math.round(n))} />} note={threats === 0 ? 'Nothing detected' : 'Review quarantine'} />
+        <Tile icon={QuarantineIcon} label="In quarantine" value={<CountUp value={quarantineItems.length} format={(n) => formatCount(Math.round(n))} />} note={quarantineItems.length === 0 ? 'Nothing isolated' : 'Isolated and encrypted'} />
         <Tile
           icon={UpdatesIcon}
           label="Threat signatures"

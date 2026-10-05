@@ -35,6 +35,34 @@ function emptyData() {
  * userData because none of it is secret, and so a missing OS keyring cannot
  * stop the app from starting.
  */
+/**
+ * Tidies a saved update log from older versions: drops entries from the old
+ * single-test-signature definitions, errors from the retired signature
+ * server and internal errors from development builds, and shows signature versions as plain numbers (no engine name).
+ */
+function cleanUpdateLog(entries) {
+  return entries
+    .filter((entry) => entry && typeof entry === 'object')
+    .filter((entry) => !(String(entry.type).startsWith('definitions') && (entry.signatureCount === 1 || /^\d{4}\.\d{2}\.\d{2}/.test(String(entry.version || '')))))
+    .filter((entry) => !(entry.type === 'definitions-failed' && /is not a function|Cannot read properties|is not defined|Untrusted update origin|No definition release is available/.test(String(entry.error || ''))))
+    .map((entry) => (entry.version ? { ...entry, version: plainVersion(entry.version) } : entry))
+}
+
+/** "ClamAV daily 28143" -> "28143". */
+function plainVersion(version) {
+  const digits = String(version).match(/(\d{4,})\s*$/)
+  return digits ? digits[1] : String(version)
+}
+
+/** Two "nothing changed" update results that read the same in the log. */
+function sameResult(a, b) {
+  const quiet = ['definitions-current', 'definitions-checked', 'application-checked']
+  if (a.type !== b.type || !quiet.includes(a.type)) return false
+  if (a.type === 'definitions-checked') return a.version === b.version && a.upToDate === b.upToDate && a.installedVersion === b.installedVersion
+  if (a.type === 'application-checked') return a.latestVersion === b.latestVersion && a.updateAvailable === b.updateAvailable
+  return a.version === b.version
+}
+
 export class HistoryStore {
   #path = path.join(app.getPath('userData'), 'history.json')
   #data = emptyData()
@@ -49,7 +77,7 @@ export class HistoryStore {
         totals: { ...emptyData().totals, ...(parsed.totals || {}) },
         daily: parsed.daily && typeof parsed.daily === 'object' ? parsed.daily : {},
         events: Array.isArray(parsed.events) ? parsed.events : [],
-        updateLog: Array.isArray(parsed.updateLog) ? parsed.updateLog.slice(0, MAX_UPDATE_LOG) : [],
+        updateLog: Array.isArray(parsed.updateLog) ? cleanUpdateLog(parsed.updateLog).slice(0, MAX_UPDATE_LOG) : [],
       }
       this.#prune()
     } catch {
@@ -160,7 +188,15 @@ export class HistoryStore {
   /** Keeps the last few update events so the Updates log survives a restart. */
   async recordUpdateEvent(event) {
     if (!event || typeof event !== 'object') return
-    this.#data.updateLog.unshift({ ...event, at: event.at || new Date().toISOString() })
+    const entry = { ...event, at: event.at || new Date().toISOString() }
+    const newest = this.#data.updateLog[0]
+    if (newest && sameResult(newest, entry)) {
+      // Routine checks every few hours would otherwise fill the log with copies.
+      this.#data.updateLog[0] = { ...entry, repeats: (newest.repeats || 1) + 1, firstAt: newest.firstAt || newest.at }
+      await this.#save()
+      return
+    }
+    this.#data.updateLog.unshift(entry)
     if (this.#data.updateLog.length > MAX_UPDATE_LOG) this.#data.updateLog.length = MAX_UPDATE_LOG
     await this.#save()
   }

@@ -78,7 +78,8 @@ function App() {
     if (result.ok) {
       state.setScannerStatus(result.data)
       setView('scan')
-      toasts.notify('Quick scan started', 'Checking Downloads, Desktop, Documents and startup items.')
+      if (result.data?.waitingForSignatures) toasts.notify('Quick scan queued', 'Downloading the threat signatures first (first time only). The scan starts by itself when they are ready.')
+      else toasts.notify('Quick scan started', 'Checking Downloads, Desktop, Documents and startup items.')
     } else {
       toasts.fail('Could not start the scan', result.error)
     }
@@ -223,7 +224,7 @@ function App() {
               aria-current={view === key ? 'page' : undefined}
               onClick={() => setView(key)}
             >
-              <span className="ico" aria-hidden="true"><Icon size={18} /></span>
+              <span className="ico" aria-hidden="true"><Icon size={18} filled={view === key} /></span>
               <span>{label}</span>
               {key === 'quarantine' && quarantineCount > 0 && <span className="count">{quarantineCount}</span>}
               {key === 'license' && !licensed && <span className="count warn">!</span>}
@@ -263,7 +264,7 @@ function App() {
           </button>
           {account ? (
             <button type="button" className="account-chip chip-button" onClick={() => setView('license')} title={account.offline ? 'Server unreachable. Showing the details saved on this device.' : 'Your details'}>
-              <span className="avatar"><UserIcon size={14} /></span>
+              <span className="avatar"><UserIcon size={14} filled /></span>
               <span className="email" title={account.email}>{account.name || (account.username ? `@${account.username}` : account.email)}</span>
               {account.offline && <span className="dot warn" />}
             </button>

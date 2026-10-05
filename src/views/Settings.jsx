@@ -3,6 +3,10 @@ import { Banner, Card, Empty, KeyValue, SettingRow, Toggle } from '../components
 import * as api from '../lib/bridge'
 import { APP_VERSION } from '../lib/bridge'
 import { licenseBadge } from '../lib/licensing'
+import { Select } from '../components/Select'
+
+const THEMES = [{ value: 'system', label: 'Match the system' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]
+const LANGUAGES = [{ value: 'en', label: 'English' }]
 
 const PROTECTION_SWITCHES = [
   ['realTimeProtection', 'Real-time protection', 'Check files as they are created or changed in Downloads, Desktop and Documents, and quarantine matches.'],
@@ -116,23 +120,18 @@ function Settings({ state, toasts }) {
             <div className="grid two">
               <div className="field">
                 <label htmlFor="setting-theme">Theme</label>
-                <select
+                <Select
                   id="setting-theme"
                   className="input"
                   value={settings.theme}
                   disabled={busy}
-                  onChange={(event) => change({ theme: event.target.value }, 'Theme updated')}
-                >
-                  <option value="system">Match the system</option>
-                  <option value="light">Light</option>
-                  <option value="dark">Dark</option>
-                </select>
+                  onChange={(theme) => change({ theme }, 'Theme updated')}
+                  options={THEMES}
+                />
               </div>
               <div className="field">
                 <label htmlFor="setting-language">Language</label>
-                <select id="setting-language" className="input" value="en" disabled aria-describedby="setting-language-note">
-                  <option value="en">English</option>
-                </select>
+                <Select id="setting-language" className="input" value="en" disabled aria-describedby="setting-language-note" onChange={() => {}} options={LANGUAGES} />
               </div>
             </div>
             <p id="setting-language-note" className="muted" style={{ fontSize: 12.5, marginTop: 14 }}>

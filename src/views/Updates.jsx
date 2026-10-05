@@ -4,15 +4,26 @@ import * as api from '../lib/bridge'
 import { APP_VERSION } from '../lib/bridge'
 import { formatCount, formatDateTime, timeAgo } from '../lib/format'
 
+/** No third-party engine names in the log: "ClamAV daily 28143" -> "28143". */
+const plain = (text) => String(text ?? '').replace(/\bclam(av)?\b\s*(daily\s*)?/gi, '').trim()
+
 /** One line of the update log, plus the dot tone. */
-function describe(event) {
+function describe(raw) {
+  const event = raw ? { ...raw, version: raw.version && plain(raw.version), installedVersion: raw.installedVersion && plain(raw.installedVersion), error: raw.error && plain(raw.error) } : raw
   switch (event?.type) {
     case 'definitions-updated':
       return ['ok', `Threat signatures updated to version ${event.version}${Number.isFinite(event.signatureCount) ? ` (${formatCount(event.signatureCount)} signatures)` : ''}.`]
     case 'definitions-current':
-      return ['ok', `Threat signatures version ${event.version} are already the newest.`]
+      return ['ok', `${event.background ? 'Automatic check: t' : 'T'}hreat signatures version ${event.version} are already the newest.`]
+    case 'definitions-checked':
+      if (event.unknownLatest) return ['warn', `Could not reach the signature servers to compare versions${event.installedVersion ? `. Installed: version ${event.installedVersion}` : ''}.`]
+      return event.upToDate
+        ? ['ok', `Checked for new signatures: version ${event.installedVersion} is the newest.`]
+        : event.installedVersion
+          ? ['warn', `Signatures version ${event.version} is available (installed ${event.installedVersion}).`]
+          : ['warn', 'Threat signatures are not downloaded yet.']
     case 'definitions-failed':
-      return ['bad', `Signature update failed. ${event.error || ''}`.trim()]
+      return ['bad', `${event.background ? 'Automatic signature update' : 'Signature update'} failed. ${event.error || ''}`.trim()]
     case 'application-checked':
       return event.updateAvailable
         ? ['warn', `Aegis ${event.latestVersion} is available (installed ${event.currentVersion}).`]
@@ -182,7 +193,7 @@ function Updates({ state, toasts }) {
                   <span className={`dot ${tone}`} />
                   <div className="body">
                     <p>{text}</p>
-                    <div className="when">{timeAgo(event.at)}</div>
+                    <div className="when">{timeAgo(event.at)}{event.repeats > 1 ? ` · same result ${event.repeats} times, first ${timeAgo(event.firstAt)}` : ''}</div>
                   </div>
                 </div>
               )

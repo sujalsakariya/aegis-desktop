@@ -73,7 +73,7 @@ export function Empty({ glyph = '✓', title, children }) {
 export function LicenseLock({ title = 'An active licence is required', children, onActivate }) {
   return (
     <div className="lock-panel">
-      <span className="lock-badge"><LockIcon size={26} /></span>
+      <span className="lock-badge"><LockIcon size={26} filled /></span>
       <strong>{title}</strong>
       {children && <p>{children}</p>}
       {onActivate && (
@@ -96,21 +96,66 @@ export function KeyValue({ label, children }) {
   )
 }
 
-/** Circular protection score. */
+const reducedMotion = () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+
 /**
- * The protection score ring. With `pending` set there is no score yet: the ring
- * shows that label instead ("Not scanned"), and `busy` makes it spin while the
- * first scan runs.
+ * A number that glides to each new value (ease-out), starting from `from` on
+ * first render. Used so scores and counters count up instead of jumping.
  */
-export function Shield({ score, tone = 'ok', pending = null, busy = false, label = 'Score', size = '' }) {
+export function useCountUp(target, { duration = 1100, from = 0 } = {}) {
+  const [value, setValue] = useState(reducedMotion() ? target : from)
+  const shown = useRef(reducedMotion() ? target : from)
+
+  useEffect(() => {
+    const start = shown.current
+    if (reducedMotion() || start === target) {
+      shown.current = target
+      setValue(target)
+      return undefined
+    }
+    let frame = 0
+    const began = performance.now()
+    const step = (now) => {
+      const t = Math.min(1, (now - began) / duration)
+      const eased = 1 - (1 - t) ** 3
+      shown.current = start + (target - start) * eased
+      setValue(shown.current)
+      if (t < 1) frame = requestAnimationFrame(step)
+    }
+    frame = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(frame)
+  }, [target, duration])
+
+  return value
+}
+
+/** A count that animates up to `value`; `format` turns it into text. */
+export function CountUp({ value, format = (n) => Math.round(n).toLocaleString() }) {
+  const shown = useCountUp(Number(value) || 0)
+  return <>{format(shown)}</>
+}
+
+const RING_COLOURS = { ok: 'var(--sys-green)', warn: 'var(--sys-orange)', bad: 'var(--sys-red)', scan: 'var(--sys-blue)' }
+
+/**
+ * The score ring (Apple activity-ring style). The ring and the number count up
+ * from 0 to `score`. With `pending` set there is no score yet and the ring shows
+ * that label instead ("Not scanned"). `tone="scan"` colours it for a scan in
+ * progress, and `caption` replaces the label under the number.
+ */
+export function Shield({ score, tone = 'ok', pending = null, busy = false, label = 'Score', caption = null, size = '' }) {
   const radius = 56
   const circumference = 2 * Math.PI * radius
+  const clamped = Math.max(0, Math.min(100, Number(score) || 0))
+  const shown = useCountUp(pending ? 0 : clamped, { duration: tone === 'scan' ? 700 : 1300 })
+  const stroke = RING_COLOURS[tone] || RING_COLOURS.ok
+
   if (pending) {
     return (
       <div className={`shield shield-pending${busy ? ' is-busy' : ''}${size ? ` shield-${size}` : ''}`} role="img" aria-label={pending}>
         <svg viewBox="0 0 132 132" aria-hidden="true">
           <circle className="track" cx="66" cy="66" r={radius} />
-          {busy && <circle className="arc" cx="66" cy="66" r={radius} style={{ stroke: 'var(--brand-a)' }} strokeDasharray={`${circumference * 0.25} ${circumference}`} />}
+          {busy && <circle className="arc" cx="66" cy="66" r={radius} style={{ stroke: RING_COLOURS.scan }} strokeDasharray={`${circumference * 0.25} ${circumference}`} />}
         </svg>
         <div className="inner">
           <strong>{busy ? '…' : '—'}</strong>
@@ -119,27 +164,26 @@ export function Shield({ score, tone = 'ok', pending = null, busy = false, label
       </div>
     )
   }
-  const clamped = Math.max(0, Math.min(100, Number(score) || 0))
-  // Theme-aware colours from index.css.
-  const stroke = tone === 'bad' ? 'var(--danger)' : tone === 'warn' ? 'var(--warn-dot)' : 'var(--brand-a)'
 
   return (
-    <div className={`shield${size ? ` shield-${size}` : ''}`} role="img" aria-label={`${label}: ${clamped} out of 100`}>
+    <div className={`shield${size ? ` shield-${size}` : ''}${tone === 'scan' ? ' is-scanning' : ''}`} style={{ '--ring': stroke }} role="img" aria-label={`${label}: ${clamped} out of 100`}>
       <svg viewBox="0 0 132 132" aria-hidden="true">
         <circle className="track" cx="66" cy="66" r={radius} />
-        <circle
-          className="arc"
-          cx="66"
-          cy="66"
-          r={radius}
-          style={{ stroke }}
-          strokeDasharray={circumference}
-          strokeDashoffset={circumference * (1 - clamped / 100)}
-        />
+        {shown > 0.2 && (
+          <circle
+            className="arc"
+            cx="66"
+            cy="66"
+            r={radius}
+            style={{ stroke }}
+            strokeDasharray={circumference}
+            strokeDashoffset={circumference * (1 - shown / 100)}
+          />
+        )}
       </svg>
       <div className="inner">
-        <strong>{clamped}</strong>
-        <span>{label}</span>
+        <strong>{Math.round(shown)}</strong>
+        <span>{caption || label}</span>
       </div>
     </div>
   )
