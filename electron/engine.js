@@ -45,7 +45,8 @@ export class ClamEngine {
 
   /** resourcesDir: the bundled ClamAV files; userData: where signatures and config live. */
   constructor({ resourcesDir, userData }) {
-    this.#root = resourcesDir
+    // ClamAV insists on absolute paths for its certificate folder.
+    this.#root = path.resolve(resourcesDir)
     this.#data = path.join(userData, 'clamav')
     this.#db = path.join(this.#data, 'db')
   }
