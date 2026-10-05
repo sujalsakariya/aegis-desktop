@@ -56,6 +56,18 @@ export class ClamEngine {
       : { clamd: path.join(this.#root, 'bin', 'clamd'), freshclam: path.join(this.#root, 'bin', 'freshclam') }
   }
 
+  /**
+   * Environment for freshclam and clamd. Some of their code (the database test
+   * process, the RAR module loader) ignores the config file and reads these.
+   */
+  get #childEnv() {
+    return {
+      ...process.env,
+      CVD_CERTS_DIR: path.join(this.#root, 'certs'),
+      ...(process.platform === 'win32' ? {} : { LD_LIBRARY_PATH: path.join(this.#root, 'lib') }),
+    }
+  }
+
   /** True when this build ships the engine for this platform. */
   isAvailable() { return existsSync(this.#bin.clamd) && existsSync(this.#bin.freshclam) }
 
@@ -182,7 +194,7 @@ export class ClamEngine {
     await this.#writeConfig()
     let output = ''
     try {
-      const result = await execFileAsync(this.#bin.freshclam, ['--config-file', path.join(this.#data, 'freshclam.conf'), '--stdout', '--no-warnings'], { windowsHide: true, timeout: 15 * 60 * 1000, maxBuffer: 4 * 1024 * 1024 })
+      const result = await execFileAsync(this.#bin.freshclam, ['--config-file', path.join(this.#data, 'freshclam.conf'), '--stdout', '--no-warnings'], { windowsHide: true, timeout: 15 * 60 * 1000, maxBuffer: 4 * 1024 * 1024, env: this.#childEnv })
       output = `${result.stdout}${result.stderr}`
     } catch (error) {
       output = `${error.stdout || ''}${error.stderr || ''}`
@@ -239,7 +251,7 @@ export class ClamEngine {
     this.#port = await freePort()
     await this.#writeConfig()
     this.#emit({ type: 'starting' })
-    const child = spawn(this.#bin.clamd, ['--config-file', path.join(this.#data, 'clamd.conf')], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] })
+    const child = spawn(this.#bin.clamd, ['--config-file', path.join(this.#data, 'clamd.conf')], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'], env: this.#childEnv })
     let stderr = ''
     child.stderr.on('data', (chunk) => { stderr = (stderr + chunk).slice(-2000) })
     this.#process = child
