@@ -40,6 +40,13 @@ jobs:
           # No Apple / Windows code-signing certificate yet: do not look for one.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
+      # The bundled ClamAV must download real signatures, start, and detect a
+      # test threat from inside the built app, on both platforms.
+      - name: Engine smoke test
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then node scripts/engine-smoke.mjs release/mac-universal/Aegis.app/Contents/Resources/clamav
+          else node scripts/engine-smoke.mjs release/win-unpacked/resources/clamav; fi
       # Launch the packaged Mac app for real: it must start, stay running and
       # reach the live API. Fails the build instead of shipping a broken .dmg.
       - name: Smoke test (macOS)
@@ -65,10 +72,16 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: installers
           merge-multiple: true
+      # ClamAV is GPL-2.0: publish its exact source next to the installers.
+      - name: ClamAV source code
+        run: |
+          VERSION=$(grep -o "CLAMAV_VERSION = '[0-9.]*'" scripts/fetch-clamav.mjs | grep -o "[0-9.]*[0-9]")
+          curl -fsSL -o "installers/clamav-$VERSION-source.tar.gz" "https://github.com/Cisco-Talos/clamav/releases/download/clamav-$VERSION/clamav-$VERSION.tar.gz"
       - name: Checksums
         run: cd installers && sha256sum * | tee SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
@@ -76,6 +89,8 @@ jobs:
           files: installers/*
           body: |
             **Windows:** download `Aegis-Setup.exe` and run it.
+
+            Aegis scans with the bundled ClamAV® engine; the first start downloads about 110 MB of official ClamAV signatures. ClamAV's source code (GPL-2.0) is attached to this release.
 
             **macOS (Intel and Apple silicon):** download the `.dmg`, open it and drag Aegis to Applications.
             The first time, macOS says it cannot check the app for malware. Open **System Settings → Privacy & Security**,

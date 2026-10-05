@@ -208,7 +208,16 @@ export function useToasts() {
 
   const push = (title, body = '', tone = '') => {
     const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`
-    setToasts((current) => [...current.slice(-3), { id, title, body, tone }])
+    // The same message again (say, a button clicked repeatedly) replaces the
+    // one on screen instead of stacking copies.
+    setToasts((current) => {
+      const others = current.filter((toast) => {
+        const same = toast.title === title && toast.body === body && toast.tone === tone
+        if (same) { clearTimeout(timers.current.get(toast.id)); timers.current.delete(toast.id) }
+        return !same
+      })
+      return [...others.slice(-3), { id, title, body, tone }]
+    })
     timers.current.set(id, setTimeout(() => dismiss(id), tone === 'error' ? 8000 : 5000))
   }
 

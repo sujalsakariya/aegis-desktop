@@ -8,11 +8,11 @@ import { formatCount, formatDateTime, timeAgo } from '../lib/format'
 function describe(event) {
   switch (event?.type) {
     case 'definitions-updated':
-      return ['ok', `Definitions updated to ${event.version}${Number.isFinite(event.signatureCount) ? ` (${formatCount(event.signatureCount)} signatures)` : ''}.`]
+      return ['ok', `Threat signatures updated to ${event.version}${Number.isFinite(event.signatureCount) ? ` (${formatCount(event.signatureCount)} signatures)` : ''}.`]
     case 'definitions-current':
-      return ['ok', `Definitions ${event.version} are already installed.`]
+      return ['ok', `Threat signatures ${event.version} are already the newest.`]
     case 'definitions-failed':
-      return ['bad', `Definition update failed. ${event.error || ''}`.trim()]
+      return ['bad', `Signature update failed. ${event.error || ''}`.trim()]
     case 'application-checked':
       return event.updateAvailable
         ? ['warn', `Aegis ${event.latestVersion} is available (installed ${event.currentVersion}).`]
@@ -25,8 +25,7 @@ function describe(event) {
 }
 
 function Updates({ state, toasts }) {
-  const { updateEvents, historySummary, refreshHistory, refreshDefinitions, definitionInfo } = state
-  const installed = historySummary?.definitions || null
+  const { updateEvents, refreshHistory, refreshDefinitions, definitionInfo } = state
   const [definition, setDefinition] = useState(null)
   const [application, setApplication] = useState(null)
   const [error, setError] = useState(null)
@@ -60,21 +59,21 @@ function Updates({ state, toasts }) {
     } else {
       setDefinition(result.data)
       if (kind === 'definitions-check') {
-        toasts.notify('Definitions checked', result.data?.noRelease
-          ? `Version ${result.data.version} is installed and no newer release has been published.`
-          : result.data?.upToDate ? `Version ${result.data.version} is already installed.` : `Version ${result.data?.version} is available.`)
+        toasts.notify('Signatures checked', result.data?.upToDate
+          ? `You have the newest signatures (${result.data.installedVersion}).`
+          : `${result.data?.version} is available. Choose Update now.`)
       } else if (result.data?.alreadyInstalled) {
-        toasts.notify('Already up to date', `Definitions ${result.data.version} are installed. Nothing was downloaded.`)
+        toasts.notify('Already up to date', `${result.data.version} is the newest. Nothing was downloaded.`)
       } else {
         refreshHistory()
         refreshDefinitions?.()
-        toasts.notify('Definitions installed', `Version ${result.data?.version} is now active.`)
+        toasts.notify('Signatures updated', `${result.data?.version} is now active.`)
       }
     }
   }
 
   const available = definition
-  const upToDate = Boolean(available?.upToDate || (available && installed?.version === available.version && definitionInfo?.count))
+  const hasSignatures = Boolean(definitionInfo?.count)
   const release = application?.release || null
 
   return (
@@ -82,9 +81,9 @@ function Updates({ state, toasts }) {
       <Banner>
         <span className="dot ok" />
         <p>
-          Updates come from the Aegis update server, and every package is checked against its digital signature and checksum
-          before it is installed. A package that fails either check, or is not a valid signature
-          list, is rejected and your current definitions are kept.
+          Aegis scans with the ClamAV engine. Its threat signatures come straight from ClamAV’s official servers, are
+          digitally signed by ClamAV, and are checked before they are used. Aegis looks for new signatures when it starts and
+          every 6 hours.
         </p>
       </Banner>
 
@@ -93,7 +92,7 @@ function Updates({ state, toasts }) {
           <span className="dot bad" />
           <p>
             <strong>
-              {error.kind.startsWith('definitions') ? 'Definition update failed.' : error.kind === 'application-open' ? 'Could not open the download.' : 'Application update check failed.'}
+              {error.kind.startsWith('definitions') ? 'Signature update failed.' : error.kind === 'application-open' ? 'Could not open the download.' : 'Application update check failed.'}
             </strong>{' '}
             {error.message}
           </p>
@@ -101,51 +100,35 @@ function Updates({ state, toasts }) {
       )}
 
       <div className="grid two">
-        <Card title="Threat definitions" subtitle="The signature set the scanner matches against.">
-          {installed ? (
+        <Card title="Threat signatures" subtitle="ClamAV engine · official signatures">
+          {hasSignatures ? (
             <>
-              <KeyValue label="Installed version">{installed.version || 'Unknown'}</KeyValue>
-              <KeyValue label="Installed">{formatDateTime(installed.installedAt)}</KeyValue>
-              {Number.isFinite(installed.signatureCount) && <KeyValue label="Signatures">{formatCount(installed.signatureCount)}</KeyValue>}
-              {installed.sha256 && (
-                <KeyValue label="Checksum"><span className="mono" style={{ fontSize: 11 }}>{String(installed.sha256).slice(0, 24)}…</span></KeyValue>
-              )}
-            </>
-          ) : definitionInfo?.version ? (
-            <>
-              <KeyValue label="Installed version">{definitionInfo.version}</KeyValue>
+              <KeyValue label="Engine">ClamAV {definitionInfo.engineRunning ? '(running)' : '(starts when needed)'}</KeyValue>
+              <KeyValue label="Signature version">{definitionInfo.version}</KeyValue>
               <KeyValue label="Signatures">{formatCount(definitionInfo.count)}</KeyValue>
+              {definitionInfo.updatedAt && <KeyValue label="Last updated">{formatDateTime(definitionInfo.updatedAt)}</KeyValue>}
             </>
           ) : (
-            <Empty glyph="↻" title="No definitions installed">
-              The scanner can only match signatures it has. Download and install a release to start detecting.
+            <Empty glyph="↻" title="Threat signatures are not downloaded yet">
+              Aegis downloads about 110 MB of ClamAV signatures the first time. Until then it cannot detect threats.
             </Empty>
           )}
 
-          {available?.noRelease && (
-            <p className="muted" style={{ borderTop: '1px solid var(--line)', fontSize: 12.5, marginTop: 16, paddingTop: 12 }}>
-              Your definitions are current. No newer release has been published on the update server.
-            </p>
-          )}
-          {available && !available.noRelease && (
+          {available && !available.unknownLatest && (
             <div style={{ borderTop: '1px solid var(--line)', marginTop: 16, paddingTop: 12 }}>
-              <div className="section-title">Available on the server</div>
+              <div className="section-title">Newest from ClamAV</div>
               <KeyValue label="Version">{available.version}</KeyValue>
               {available.publishedAt && <KeyValue label="Published">{formatDateTime(available.publishedAt)}</KeyValue>}
-              {upToDate && <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>You already have this release.</p>}
+              {available.upToDate && <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>You already have these signatures.</p>}
             </div>
           )}
           <div className="row wrap" style={{ marginTop: 18 }}>
             <button type="button" className="btn btn-ghost btn-sm" disabled={Boolean(busy)} onClick={() => run('definitions-check')}>
               {busy === 'definitions-check' ? 'Checking…' : 'Check for updates'}
             </button>
-            {upToDate ? (
-              <button type="button" className="btn btn-ghost btn-sm" disabled={Boolean(busy)} onClick={() => run('definitions-reinstall')}>
-                {busy === 'definitions-reinstall' ? 'Reinstalling…' : 'Reinstall'}
-              </button>
-            ) : (
+            {(!hasSignatures || (available && !available.upToDate)) && (
               <button type="button" className="btn btn-primary btn-sm" disabled={Boolean(busy)} onClick={() => run('definitions-install')}>
-                {busy === 'definitions-install' ? 'Installing…' : 'Download and install'}
+                {busy === 'definitions-install' ? (hasSignatures ? 'Updating…' : 'Downloading…') : hasSignatures ? 'Update now' : 'Download signatures'}
               </button>
             )}
           </div>
@@ -188,7 +171,7 @@ function Updates({ state, toasts }) {
       <Card title="Update log" subtitle="The last 50 update events on this device." bodyClass="tight">
         {updateEvents.length === 0 ? (
           <Empty glyph="◷" title="Nothing logged yet">
-            Definition installs, failures and application update checks appear here.
+            Signature updates, failures and application update checks appear here.
           </Empty>
         ) : (
           <div className="list">

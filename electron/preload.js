@@ -44,6 +44,18 @@ contextBridge.exposeInMainWorld('scannerAPI', {
   },
 })
 
+contextBridge.exposeInMainWorld('cleanerAPI', {
+  status: () => ipcRenderer.invoke('cleaner:status'),
+  analyze: () => ipcRenderer.invoke('cleaner:analyze'),
+  clean: (categoryIds) => ipcRenderer.invoke('cleaner:clean', categoryIds),
+  cancel: () => ipcRenderer.invoke('cleaner:cancel'),
+  onUpdate: (listener) => {
+    const handler = (_event, status) => listener(status)
+    ipcRenderer.on('cleaner:update', handler)
+    return () => ipcRenderer.removeListener('cleaner:update', handler)
+  },
+})
+
 contextBridge.exposeInMainWorld('quarantineAPI', {
   list: () => ipcRenderer.invoke('quarantine:list'),
   restore: (id) => ipcRenderer.invoke('quarantine:restore', id),

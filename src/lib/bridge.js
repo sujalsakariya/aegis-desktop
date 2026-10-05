@@ -17,6 +17,7 @@ const BRIDGES = [
   'usbAPI',
   'updatesAPI',
   'historyAPI',
+  'cleanerAPI',
 ]
 
 export function hasBridge(name) {
@@ -77,6 +78,14 @@ export const scanner = {
   resume: () => call('scannerAPI', 'resume'),
   cancel: () => call('scannerAPI', 'cancel'),
   onUpdate: (listener) => subscribe('scannerAPI', listener),
+}
+
+export const cleaner = {
+  status: () => call('cleanerAPI', 'status'),
+  analyze: () => call('cleanerAPI', 'analyze'),
+  clean: (categoryIds) => call('cleanerAPI', 'clean', categoryIds),
+  cancel: () => call('cleanerAPI', 'cancel'),
+  onUpdate: (listener) => subscribe('cleanerAPI', listener),
 }
 
 export const quarantine = {

@@ -143,14 +143,21 @@ function Settings({ state, toasts }) {
 
       <Card title="About Aegis">
         <KeyValue label="Version">{APP_VERSION}</KeyValue>
-        <KeyValue label="Threat definitions">
+        <KeyValue label="Scanning engine">ClamAV 1.5.4</KeyValue>
+        <KeyValue label="Threat signatures">
           {definitionInfo?.count
-            ? `${definitionInfo.version ? `v${definitionInfo.version} · ` : ''}${definitionInfo.count.toLocaleString()} signature${definitionInfo.count === 1 ? '' : 's'}`
-            : 'Not installed'}
+            ? `${definitionInfo.version ? `${definitionInfo.version} · ` : ''}${definitionInfo.count.toLocaleString('en-US')} signatures`
+            : 'Not downloaded yet'}
         </KeyValue>
         <KeyValue label="Licence">{licenseBadge(licenseStatus).label}</KeyValue>
         <p className="muted" style={{ fontSize: 12.5, margin: '14px 0 0' }}>
-          © {new Date().getFullYear()} Aegis. Updates for the app and threat definitions are on the Updates page.
+          © {new Date().getFullYear()} Aegis. Updates for the app and threat signatures are on the Updates page.
+        </p>
+        <p className="muted" style={{ fontSize: 12, margin: '10px 0 0' }}>
+          Open-source software: Aegis includes ClamAV® 1.5.4 by Cisco Systems, Inc., licensed under the GNU General Public
+          License version 2. Its license is installed with Aegis (resources/clamav/COPYING), and the complete corresponding
+          source code is published with every Aegis release and at github.com/Cisco-Talos/clamav. ClamAV is a registered
+          trademark of Cisco Systems, Inc. Aegis is not affiliated with or endorsed by Cisco.
         </p>
       </Card>
 

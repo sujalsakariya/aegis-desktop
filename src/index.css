@@ -608,3 +608,22 @@ button.account-chip { color: inherit; font: inherit; padding-right: 12px; }
 .segmented button:hover { color: var(--text); }
 .segmented button.active { background: var(--paper); box-shadow: 0 1px 3px rgba(15, 23, 42, .12); color: var(--text); }
 .segmented button:focus-visible { outline: 2px solid var(--brand-a); outline-offset: 1px; }
+
+/* ---------- PC Cleaner ---------- */
+.cleaner-summary { align-items: center; display: flex; gap: 20px; }
+.cleaner-badge { align-items: center; background: var(--brand-fill); border-radius: 18px; color: #fff; display: flex; flex: none; height: 64px; justify-content: center; width: 64px; }
+.cleaner-badge.busy { animation: cleaner-pulse 1.4s ease-in-out infinite; }
+@keyframes cleaner-pulse { 50% { opacity: .65; transform: scale(.95); } }
+.cleaner-figure { flex: 1; min-width: 0; }
+.cleaner-figure h2 { font-size: 26px; font-weight: 600; letter-spacing: -.035em; line-height: 1.15; margin: 0; }
+.cleaner-figure h2 span { color: var(--text-soft); font-size: 17px; font-weight: 500; letter-spacing: -.01em; }
+.cleaner-figure p { color: var(--text-dim); font-size: 13px; margin: 6px 0 0; }
+.cleaner-row { align-items: flex-start; cursor: pointer; }
+.cleaner-row.is-empty { cursor: default; opacity: .6; }
+.cleaner-check { accent-color: var(--accent-ink); flex: none; height: 17px; margin-top: 2px; width: 17px; }
+.cleaner-desc { color: var(--text-soft); display: block; font-size: 12.5px; line-height: 1.5; margin-top: 3px; }
+.cleaner-parts { color: var(--text-dim); display: block; font-family: var(--mono); font-size: 11px; margin-top: 6px; }
+.cleaner-note { color: var(--warn); display: block; font-size: 12px; font-weight: 500; margin-top: 6px; }
+.cleaner-size { color: var(--text); font-family: var(--sans, inherit); font-size: 14px !important; margin-bottom: 2px; }
+.cleaner-actions { align-items: center; border-top: 1px solid var(--line); display: flex; gap: 16px; justify-content: space-between; padding: 16px 20px; }
+.cleaner-actions p { font-size: 13px; margin: 0; }

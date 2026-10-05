@@ -9,6 +9,8 @@ import { ScanScheduler, validateSchedule } from './scheduler.js'
 import { UsbMonitor } from './usb.js'
 import { UpdateManager } from './updates.js'
 import { HistoryStore } from './history.js'
+import { Cleaner } from './cleaner.js'
+import { ClamEngine } from './engine.js'
 
 // Set by vite-plugin-electron
 process.env.APP_ROOT = path.join(__dirname, '..')
@@ -27,13 +29,20 @@ let trayHintShown = false
 
 const licenseManager = new LicenseManager()
 const quarantine = new QuarantineManager()
-const scanner = new Scanner({ quarantine })
+// ClamAV ships inside the app (extraResources); in development it comes from
+// vendor/clamav/<platform>, filled by `npm run fetch-engine`.
+const engine = new ClamEngine({
+  resourcesDir: app.isPackaged ? path.join(process.resourcesPath, 'clamav') : path.join(app.getAppPath(), 'vendor', 'clamav', process.platform),
+  userData: app.getPath('userData'),
+})
+const scanner = new Scanner({ quarantine, engine })
 const realtime = new RealtimeProtection(scanner, quarantine)
 const settings = new SettingsStore()
 const scheduler = new ScanScheduler(scanner, app.getPath('userData'))
 const usb = new UsbMonitor(settings, scanner)
-const updates = new UpdateManager(scanner)
+const updates = new UpdateManager(engine)
 const history = new HistoryStore()
+const cleaner = new Cleaner()
 
 function requireString(value, name) {
   if (typeof value !== 'string' || value.length === 0 || value.length > 512) throw new Error(`${name} is required`)
@@ -48,6 +57,14 @@ function assertTrustedSender(event) {
 
 function handler(handler) {
   return (event, ...args) => { assertTrustedSender(event); return handler(...args) }
+}
+
+function formatSize(bytes) {
+  const units = ['bytes', 'KB', 'MB', 'GB', 'TB']
+  let value = Number(bytes) || 0
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1 }
+  return `${unit ? value.toFixed(value >= 10 ? 0 : 1) : value} ${units[unit]}`
 }
 
 function requireLicense() {
@@ -318,15 +335,23 @@ function registerIpcHandlers() {
   ipcMain.handle('license:account', handler(() => licenseManager.getAccount()))
   ipcMain.handle('license:saveProfile', handler((profile) => licenseManager.saveProfile({ username: requireString(profile?.username, 'Username'), name: requireString(profile?.name, 'Name'), email: requireString(profile?.email, 'Email'), phone: requireString(profile?.phone, 'Phone') })))
   ipcMain.handle('license:login', handler((credentials) => licenseManager.saveProfile({ username: requireString(credentials?.username, 'Username'), email: requireString(credentials?.email, 'Email') })))
-  ipcMain.handle('license:keyLogin', handler((credentials) => licenseManager.keyLogin(requireString(credentials?.email, 'Email'), requireString(credentials?.licenseKey, 'Licence key'))))
+  ipcMain.handle('license:keyLogin', handler((credentials) => licenseManager.keyLogin(typeof credentials?.email === 'string' ? credentials.email.trim() : '', requireString(credentials?.licenseKey, 'Licence key'))))
   ipcMain.handle('license:signUp', handler((input) => licenseManager.signUp({ username: requireString(input?.username, 'Username'), name: requireString(input?.name, 'Name'), email: requireString(input?.email, 'Email'), phone: requireString(input?.phone, 'Phone') }, requireString(input?.licenseKey, 'Licence key'))))
   ipcMain.handle('license:updateProfile', handler((profile) => licenseManager.updateProfile({ name: requireString(profile?.name, 'Name'), phone: requireString(profile?.phone, 'Phone') })))
   ipcMain.handle('license:logout', handler(() => licenseManager.logout()))
   ipcMain.handle('license:activate', handler((licenseKey) => licenseManager.activate(requireString(licenseKey, 'License key'))))
   ipcMain.handle('license:validate', handler(() => licenseManager.validate({ force: true })))
   ipcMain.handle('license:deactivate', handler(() => licenseManager.deactivate()))
+  ipcMain.handle('cleaner:status', handler(() => cleaner.getStatus()))
+  ipcMain.handle('cleaner:analyze', handler(() => cleaner.analyze()))
+  ipcMain.handle('cleaner:clean', handler(async (categoryIds) => {
+    const result = await cleaner.clean(Array.isArray(categoryIds) ? categoryIds.map(String).slice(0, 10) : [])
+    if (result.deleted) history.recordEvent('ok', `PC Cleaner removed ${result.deleted.toLocaleString('en-US')} junk file(s) and freed ${formatSize(result.freedBytes)}.`).catch(() => {})
+    return result
+  }))
+  ipcMain.handle('cleaner:cancel', handler(() => cleaner.cancel()))
   ipcMain.handle('scanner:status', handler(() => scanner.getStatus()))
-  ipcMain.handle('scanner:definitions', handler(() => ({ count: scanner.getDefinitionCount(), version: updates.getInstalled()?.version || history.getSummary()?.definitions?.version || null })))
+  ipcMain.handle('scanner:definitions', handler(() => ({ count: scanner.getDefinitionCount(), version: updates.getInstalled()?.version || null, updatedAt: engine.getInfo().updatedAt, engine: engine.isAvailable() ? 'ClamAV' : null, engineRunning: engine.isRunning() })))
   ipcMain.handle('scanner:start', handler((options) => scanner.start(scanOptions(options))))
   ipcMain.handle('scanner:pause', handler(() => scanner.pause()))
   ipcMain.handle('scanner:resume', handler(() => scanner.resume()))
@@ -476,7 +501,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', () => showWindow())
 
-  app.on('before-quit', () => { isQuitting = true })
+  app.on('before-quit', () => { isQuitting = true; engine.stop() })
 
   app.on('window-all-closed', () => {
     // With "keep protecting" on the window hides instead of closing, so this
@@ -492,10 +517,12 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(async () => {
     registerIpcHandlers()
     scanner.setGate(() => licenseManager.isLicensed())
+    cleaner.setGate(() => licenseManager.isLicensed())
     scanner.setPolicy({ exclusions: () => settings.get().scanExclusions, isAllowed: (sha256) => quarantine.isAllowed(sha256) })
     // Local state only: fast, and a failure in one store must not stop the window.
     await safeInit('history', () => history.initialize())
     await safeInit('settings', () => settings.initialize())
+    await safeInit('engine', () => engine.initialize())
     await safeInit('scanner', () => scanner.initialize())
     await safeInit('quarantine', () => quarantine.initialize())
     await safeInit('updates', () => updates.initialize({ fallback: history.getSummary()?.definitions }))

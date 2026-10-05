@@ -1,10 +1,9 @@
 import { app, BrowserWindow } from 'electron'
 import fs from 'node:fs/promises'
-import { createReadStream } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import crypto from 'node:crypto'
 import { createExclusionMatcher } from './pathmatch.js'
+import { hashFile, MAX_SCAN_BYTES, SCAN_PARALLELISM } from './engine.js'
 
 const QUICK_NAMES = ['Downloads', 'Desktop', 'Documents']
 // macOS keeps mail, messages, contacts and similar private data in these folders.
@@ -25,13 +24,47 @@ const SOURCES = ['manual', 'scheduled', 'startup', 'usb']
 // The status is pushed to the window on every file, so keep the list bounded.
 const MAX_LISTED_DETECTIONS = 200
 
+// Real-time protection sends these to the full engine (the instant hash check
+// covers everything else): programs, scripts, installers, archives, macro
+// documents and other formats malware is usually delivered in.
+const RISKY_EXTENSIONS = new Set(['exe', 'dll', 'scr', 'com', 'pif', 'cpl', 'ocx', 'sys', 'msi', 'msix', 'msp', 'appx', 'bat', 'cmd', 'ps1', 'psm1', 'vbs', 'vbe', 'js', 'jse', 'wsf', 'wsh', 'hta', 'lnk', 'url', 'reg', 'jar', 'apk', 'sh', 'command', 'dmg', 'pkg', 'iso', 'img', 'vhd', 'zip', 'rar', '7z', 'gz', 'tgz', 'bz2', 'xz', 'tar', 'cab', 'arj', 'ace', 'doc', 'docm', 'dot', 'dotm', 'xls', 'xlsm', 'xlsb', 'xlam', 'ppt', 'pptm', 'potm', 'rtf', 'pdf', 'one', 'chm', 'html', 'htm', 'svg', 'eml', 'msg'])
+
+/** Executable or risky by extension, or by its first bytes (PE, Mach-O, ELF, script). */
+async function isRisky(filePath) {
+  const extension = path.extname(filePath).slice(1).toLowerCase()
+  if (RISKY_EXTENSIONS.has(extension)) return true
+  try {
+    const handle = await fs.open(filePath, 'r')
+    try {
+      const head = Buffer.alloc(4)
+      const { bytesRead } = await handle.read(head, 0, 4, 0)
+      if (bytesRead < 2) return false
+      const magic = head.readUInt32BE(0)
+      return head.toString('latin1', 0, 2) === 'MZ' || head.toString('latin1', 0, 2) === '#!' || head.toString('latin1', 0, 4) === '\x7fELF'
+        || [0xfeedface, 0xfeedfacf, 0xcefaedfe, 0xcffaedfe, 0xcafebabe].includes(magic)
+    } finally { await handle.close() }
+  } catch { return false }
+}
+
+/** "PUA.Win.Packer…" are potentially unwanted programs, not malware. */
+function severityOf(threatName) {
+  if (/^PUA\./i.test(threatName)) return 'medium'
+  if (/eicar|\.Test\./i.test(threatName)) return 'low'
+  return 'high'
+}
+
+// Consecutive engine failures after which a scan stops instead of reporting
+// unchecked files as clean.
+const MAX_ENGINE_FAILURES = 25
+
 function createInitialStatus() {
   return { state: 'idle', mode: null, source: null, filesScanned: 0, threatsDetected: 0, quarantined: 0, detections: [], currentFile: null, startedAt: null, elapsedMs: 0, scanSpeed: 0, error: null }
 }
 
 export class Scanner {
-  #definitionsPath
-  #definitions = new Map()
+  #engine
+  #inflight = new Set()
+  #engineFailures = 0
   #status = createInitialStatus()
   #running = null
   #busy = false
@@ -44,21 +77,14 @@ export class Scanner {
   #policy = { exclusions: () => [], isAllowed: () => false }
   #isExcluded = () => false
 
-  constructor({ quarantine } = {}) {
-    this.#definitionsPath = path.join(app.getPath('userData'), 'definitions.json')
+  constructor({ quarantine, engine } = {}) {
     this.#quarantine = quarantine || null
+    this.#engine = engine
   }
 
   async initialize() {
-    try {
-      const contents = await fs.readFile(this.#definitionsPath, 'utf8')
-      const definitions = JSON.parse(contents)
-      if (!Array.isArray(definitions)) throw new Error('Definitions must be an array')
-      this.#definitions = new Map(definitions.filter((item) => typeof item?.sha256 === 'string').map((item) => [item.sha256.toLowerCase(), item]))
-      if (this.#status.error === 'Unable to load local definitions.') this.#status = { ...this.#status, error: null }
-    } catch (error) {
-      if (error?.code !== 'ENOENT') this.#status.error = 'Unable to load local definitions.'
-    }
+    // The old hash-list definitions (a single test signature) are replaced by ClamAV.
+    for (const name of ['definitions.json', 'definitions-meta.json']) await fs.rm(path.join(app.getPath('userData'), name), { force: true }).catch(() => {})
   }
 
   getStatus() { return this.#status }
@@ -72,7 +98,7 @@ export class Scanner {
   /** Fires for every detection made by a scan (not by inspectFile). */
   onDetection(listener) { this.#detectionListeners.add(listener); return () => this.#detectionListeners.delete(listener) }
 
-  getDefinitionCount() { return this.#definitions.size }
+  getDefinitionCount() { return this.#engine.getInfo().signatures }
 
   /**
    * `exclusions()` returns the user's excluded paths; `isAllowed(sha256)` says
@@ -94,14 +120,22 @@ export class Scanner {
 
   #allowed(sha256) { try { return Boolean(this.#policy.isAllowed(sha256)) } catch { return false } }
 
+  /**
+   * Real-time check of one file: ClamAV's whole-file hash signatures first
+   * (instant, no engine needed), then the full engine for risky file types.
+   */
   async inspectFile(filePath) {
     try {
       const stats = await fs.lstat(filePath)
       if (!stats.isFile() || stats.isSymbolicLink()) return { detected: false, filePath }
-      const sha256 = await this.#hashFile(filePath)
-      const definition = this.#definitions.get(sha256) || null
-      if (definition && this.#allowed(sha256)) return { detected: false, allowed: true, definition: null, sha256, filePath }
-      return { detected: Boolean(definition), definition, sha256, filePath }
+      const hashes = await hashFile(filePath)
+      let threatName = this.#engine.lookupHashes(hashes)
+      if (!threatName && stats.size <= MAX_SCAN_BYTES && await isRisky(filePath)) {
+        const result = await this.#engine.scanFile(filePath)
+        if (result.infected) threatName = result.name
+      }
+      if (threatName && this.#allowed(hashes.sha256)) return { detected: false, allowed: true, definition: null, sha256: hashes.sha256, filePath }
+      return { detected: Boolean(threatName), definition: threatName ? { threatName, severity: severityOf(threatName) } : null, sha256: hashes.sha256, filePath }
     } catch { return { detected: false, filePath } }
   }
 
@@ -113,6 +147,8 @@ export class Scanner {
   async start({ mode = 'quick', paths = [], trusted = false, source = 'manual' } = {}) {
     if (this.#gate && !this.#gate()) throw new Error('An active licence is required to scan. Activate a licence on the Licence page.')
     if (this.#busy) throw new Error('A scan is already running')
+    if (!this.#engine.isAvailable()) throw new Error('The scanning engine is missing from this installation. Reinstall Aegis.')
+    if (!this.#engine.getInfo().ready) throw new Error('Aegis is still downloading the threat signatures. Try again in a minute.')
     this.#busy = true
     let scanPaths
     try {
@@ -125,8 +161,9 @@ export class Scanner {
     this.#cancelled = false
     this.#paused = false
     this.#visitedDirectories.clear()
+    this.#engineFailures = 0
     this.#isExcluded = this.exclusionMatcher()
-    this.#status = { ...createInitialStatus(), state: 'running', mode, source: SOURCES.includes(source) ? source : 'manual', startedAt: Date.now() }
+    this.#status = { ...createInitialStatus(), state: 'running', mode, source: SOURCES.includes(source) ? source : 'manual', startedAt: Date.now(), preparing: !this.#engine.isRunning() }
     this.#running = this.#run(scanPaths).finally(() => { this.#running = null; this.#busy = false; this.#publish() })
     this.#publish()
     return this.#status
@@ -165,13 +202,20 @@ export class Scanner {
 
   async #run(paths) {
     try {
+      // Loading 3.6 million signatures takes a few seconds the first time.
+      await this.#engine.ensureRunning()
+      this.#status = { ...this.#status, preparing: false, startedAt: Date.now() }
+      this.#publish()
       for (const scanPath of paths) {
         if (this.#cancelled) break
         await this.#walk(scanPath)
       }
+      await Promise.all(this.#inflight)
       this.#status = { ...this.#status, state: this.#cancelled ? 'cancelled' : 'completed', currentFile: null, elapsedMs: Date.now() - this.#status.startedAt }
     } catch (error) {
-      this.#status = { ...this.#status, state: 'failed', currentFile: null, error: error instanceof Error ? error.message : 'Scan failed', elapsedMs: Date.now() - this.#status.startedAt }
+      this.#cancelled = true
+      await Promise.allSettled(this.#inflight)
+      this.#status = { ...this.#status, state: 'failed', preparing: false, currentFile: null, error: error instanceof Error ? error.message : 'Scan failed', elapsedMs: Date.now() - this.#status.startedAt }
     }
   }
 
@@ -180,7 +224,7 @@ export class Scanner {
     let stats
     try { stats = await fs.lstat(entryPath) } catch { return }
     if (this.#cancelled || stats.isSymbolicLink()) return
-    if (stats.isFile()) { await this.#scanFile(entryPath, stats.size); return }
+    if (stats.isFile()) { await this.#enqueue(entryPath); return }
     if (!stats.isDirectory()) return
     if (MAC_SKIPPED.has(entryPath)) return
     let directoryIdentity
@@ -196,13 +240,30 @@ export class Scanner {
     }
   }
 
+  /** Keeps SCAN_PARALLELISM files with the engine at once. */
+  async #enqueue(filePath) {
+    while (this.#inflight.size >= SCAN_PARALLELISM) await Promise.race(this.#inflight)
+    if (this.#engineFailures >= MAX_ENGINE_FAILURES) throw new Error('The scanning engine stopped responding, so the scan was stopped. Start it again.')
+    const job = this.#scanFile(filePath).finally(() => this.#inflight.delete(job))
+    this.#inflight.add(job)
+  }
+
   async #scanFile(filePath) {
     if (this.#cancelled) return
     this.#status = { ...this.#status, currentFile: filePath, filesScanned: this.#status.filesScanned + 1, elapsedMs: Date.now() - this.#status.startedAt }
-    let hash = null
-    try { hash = await this.#hashFile(filePath) } catch { /* Files can disappear or become unreadable while scanning. */ }
-    const definition = hash ? this.#definitions.get(hash) : null
-    if (definition && !this.#allowed(hash)) await this.#handleDetection(filePath, definition)
+    let result = null
+    try {
+      result = await this.#engine.scanFile(filePath)
+      this.#engineFailures = 0
+    } catch {
+      // A file that vanished is normal; an engine that stopped answering is not.
+      if (!this.#engine.isRunning()) this.#engineFailures += 1
+    }
+    if (result?.infected) {
+      let sha256 = null
+      try { sha256 = (await hashFile(filePath)).sha256 } catch { /* gone */ }
+      if (!sha256 || !this.#allowed(sha256)) await this.#handleDetection(filePath, { threatName: result.name, severity: severityOf(result.name) })
+    }
     const elapsed = Math.max(1, Date.now() - this.#status.startedAt)
     this.#status = { ...this.#status, elapsedMs: elapsed, scanSpeed: Math.round(this.#status.filesScanned / (elapsed / 1000)) }
     this.#publish()
@@ -225,7 +286,6 @@ export class Scanner {
     for (const listener of this.#detectionListeners) { try { listener({ ...detection, source: this.#status.source, mode: this.#status.mode }) } catch { /* A listener must never break a scan. */ } }
   }
 
-  #hashFile(filePath) { return new Promise((resolve, reject) => { const hash = crypto.createHash('sha256'); const stream = createReadStream(filePath); stream.on('data', (chunk) => hash.update(chunk)); stream.on('error', reject); stream.on('end', () => resolve(hash.digest('hex'))) }) }
   #publish() {
     for (const window of BrowserWindow.getAllWindows()) window.webContents.send('scanner:update', this.#status)
     for (const listener of this.#listeners) { try { listener(this.#status) } catch { /* A listener must never break a scan. */ } }

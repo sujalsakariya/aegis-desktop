@@ -1,11 +1,8 @@
-import { app, shell } from 'electron'
-import fs from 'node:fs/promises'
+import { shell } from 'electron'
 import crypto from 'node:crypto'
-import path from 'node:path'
 
 const API_URL = process.env.LICENSE_API_URL || 'http://localhost:3001'
 const PUBLIC_KEY = process.env.DEFINITION_SIGNING_PUBLIC_KEY || ''
-const MAX_DEFINITION_BYTES = 256 * 1024 * 1024
 const MIN_APP_VERSION = process.env.MIN_APP_VERSION || '0.0.0'
 const REQUEST_TIMEOUT_MS = 15000
 
@@ -36,82 +33,57 @@ async function readJson(response, what) {
   }
 }
 
-/** Validates a downloaded definitions package before it replaces the installed one. */
-export function parseDefinitions(buffer) {
-  let parsed
-  try { parsed = JSON.parse(buffer.toString('utf8')) } catch { throw new Error('The downloaded definitions are not valid JSON. The installed definitions were kept.') }
-  if (!Array.isArray(parsed)) throw new Error('The downloaded definitions are not a list of signatures. The installed definitions were kept.')
-  const bad = parsed.findIndex((item) => !item || typeof item !== 'object' || typeof item.sha256 !== 'string' || !/^[0-9a-f]{64}$/i.test(item.sha256))
-  if (bad !== -1) throw new Error(`Signature ${bad + 1} in the downloaded definitions has no valid sha256 hash. The installed definitions were kept.`)
-  return parsed
-}
+/** "daily 28143" style label for a ClamAV signature version. */
+function label(version) { return Number.isFinite(version) ? `ClamAV daily ${version}` : null }
 
+/**
+ * Threat signatures come from ClamAV's official mirrors (via the bundled
+ * engine's freshclam); application builds come from the Aegis server.
+ * Event types stay the same as before: definitions-updated / -current / -failed.
+ */
 export class UpdateManager {
-  #scanner
-  #definitionsPath
-  #metaPath
+  #engine
   #listeners = new Set()
   #eventListeners = new Set()
-  #meta = null
   #latestApplication = null
   #installing = null
 
-  constructor(scanner) {
-    this.#scanner = scanner
-    this.#definitionsPath = path.join(app.getPath('userData'), 'definitions.json')
-    this.#metaPath = path.join(app.getPath('userData'), 'definitions-meta.json')
+  constructor(engine) {
+    this.#engine = engine
   }
 
-  /** Loads the installed-definitions record kept next to definitions.json. */
-  async initialize({ fallback = null } = {}) {
-    try {
-      const parsed = JSON.parse(await fs.readFile(this.#metaPath, 'utf8'))
-      this.#meta = parsed && typeof parsed === 'object' ? parsed : null
-    } catch { this.#meta = null }
-    // Installs from before this record existed: trust the history entry while
-    // the definitions file itself is still present.
-    if (!this.#meta && fallback?.version && this.#scanner.getDefinitionCount() > 0) this.#meta = { ...fallback }
-  }
+  async initialize() {}
 
-  /** Installed definitions (version, installedAt, sha256, signatureCount) or null. */
-  getInstalled() { return this.#meta ? { ...this.#meta } : null }
+  /** Installed signatures (version, installedAt, signatureCount) or null. */
+  getInstalled() {
+    const info = this.#engine.getInfo()
+    return info.ready ? { version: label(info.version), installedAt: info.updatedAt, publishedAt: info.buildTime, signatureCount: info.signatures } : null
+  }
 
   onInstalled(listener) { this.#listeners.add(listener); return () => this.#listeners.delete(listener) }
 
   /** Every update result worth logging: installs, failures, application checks. */
   onEvent(listener) { this.#eventListeners.add(listener); return () => this.#eventListeners.delete(listener) }
 
-  #assertDownloadUrl(value) { const url = new URL(value); const configured = new URL(API_URL); if (url.protocol !== 'https:' && configured.protocol !== 'http:') throw new Error('Unsigned update transport'); if (url.origin !== configured.origin) throw new Error('Untrusted update origin'); return url }
-
-  /**
-   * The latest release on the server, compared with what is installed. When
-   * nothing is published (404) the installed definitions are simply current:
-   * { noRelease: true, upToDate: true }. Only a PC with no definitions at all
-   * treats that as an error, since it then cannot detect anything.
-   */
+  /** The newest published signature version compared with what is installed. */
   async checkDefinitions() {
-    const response = await request(`${API_URL}/api/definitions/latest`)
-    const body = await readJson(response, 'Definition metadata')
-    if (response.status === 404) {
-      const installedVersion = this.#meta?.version || null
-      if (!installedVersion || this.#scanner.getDefinitionCount() === 0) throw new Error('No threat definitions have been published on the update server yet, so none could be installed. Please contact support.')
-      return { noRelease: true, version: installedVersion, installedVersion, upToDate: true }
+    const info = this.#engine.getInfo()
+    const latest = await this.#engine.latestVersion()
+    const installedVersion = info.ready ? label(info.version) : null
+    return {
+      version: latest ? label(latest.daily) : installedVersion,
+      publishedAt: latest?.publishedAt || null,
+      installedVersion,
+      signatureCount: info.signatures,
+      upToDate: Boolean(info.ready && (!latest || latest.daily <= info.version)),
+      unknownLatest: !latest,
     }
-    if (!response.ok) throw new Error(body.error || `Definition metadata unavailable (HTTP ${response.status}).`)
-    if (!body.release || typeof body.release !== 'object') throw new Error('The server returned no definition release.')
-    if (!verifyMetadata({ version: body.release.version, downloadUrl: body.release.downloadUrl, sha256: body.release.sha256 }, body.release.signature)) throw new Error('Definition signature verification failed')
-    const installedVersion = this.#meta?.version || null
-    return { ...body.release, installedVersion, upToDate: Boolean(installedVersion && installedVersion === body.release.version && this.#scanner.getDefinitionCount() > 0) }
   }
 
-  /**
-   * Single-flight: concurrent callers share one download instead of racing on
-   * the same file. Skips the download when the installed version already
-   * matches the server, unless `force` is set.
-   */
-  updateDefinitions({ force = false, background = false } = {}) {
+  /** Single-flight signature update; `force` is accepted for compatibility (freshclam decides). */
+  updateDefinitions({ background = false } = {}) {
     if (!this.#installing) {
-      this.#installing = this.#installDefinitions({ force, background })
+      this.#installing = this.#installDefinitions({ background })
         .catch((error) => {
           this.#emit({ type: 'definitions-failed', error: error instanceof Error ? error.message : String(error), background })
           throw error
@@ -121,38 +93,16 @@ export class UpdateManager {
     return this.#installing
   }
 
-  async #installDefinitions({ force, background }) {
-    const release = await this.checkDefinitions()
-    if (release.noRelease && force) throw new Error('The update server has no published release to reinstall. Your installed definitions were kept.')
-    if (release.upToDate && !force) {
+  async #installDefinitions({ background }) {
+    const { updated, info } = await this.#engine.update()
+    const release = { version: label(info.version), publishedAt: info.buildTime }
+    if (!updated) {
       this.#emit({ type: 'definitions-current', version: release.version, background })
-      return { ...release, alreadyInstalled: true }
+      return { ...release, installedVersion: release.version, upToDate: true, alreadyInstalled: true, signatureCount: info.signatures }
     }
-    this.#assertDownloadUrl(release.downloadUrl)
-    const response = await request(release.downloadUrl)
-    if (!response.ok) throw new Error(`Definition download failed (HTTP ${response.status}).`)
-    const contentLength = Number(response.headers.get('content-length') || 0)
-    if (contentLength > MAX_DEFINITION_BYTES) throw new Error('Definition package is too large')
-    const data = Buffer.from(await response.arrayBuffer())
-    if (data.byteLength > MAX_DEFINITION_BYTES) throw new Error('Definition package is too large')
-    const checksum = crypto.createHash('sha256').update(data).digest('hex')
-    if (checksum.toLowerCase() !== String(release.sha256).toLowerCase()) throw new Error('Definition checksum verification failed')
-    // Validate before touching the installed file: a bad package keeps the old one.
-    const definitions = parseDefinitions(data)
-    const tempPath = `${this.#definitionsPath}.tmp`
-    await fs.writeFile(tempPath, data, { mode: 0o600 })
-    await fs.rename(tempPath, this.#definitionsPath)
-    await this.#scanner.initialize()
-    const signatureCount = this.#scanner.getDefinitionCount?.() ?? definitions.length
-    this.#meta = { version: release.version, installedAt: new Date().toISOString(), publishedAt: release.publishedAt || null, sha256: release.sha256, signatureCount }
-    try {
-      const metaTemp = `${this.#metaPath}.tmp`
-      await fs.writeFile(metaTemp, JSON.stringify(this.#meta), { mode: 0o600 })
-      await fs.rename(metaTemp, this.#metaPath)
-    } catch { /* The definitions are installed; only the version record failed. */ }
-    for (const listener of this.#listeners) { try { listener(release, signatureCount) } catch { /* ignore */ } }
-    this.#emit({ type: 'definitions-updated', version: release.version, signatureCount, background })
-    return { ...release, installedVersion: release.version, upToDate: true, alreadyInstalled: false, signatureCount }
+    for (const listener of this.#listeners) { try { listener(release, info.signatures) } catch { /* ignore */ } }
+    this.#emit({ type: 'definitions-updated', version: release.version, signatureCount: info.signatures, background })
+    return { ...release, installedVersion: release.version, upToDate: true, alreadyInstalled: false, signatureCount: info.signatures }
   }
 
   /**

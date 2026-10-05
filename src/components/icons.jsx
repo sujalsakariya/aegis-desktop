@@ -32,6 +32,17 @@ export const DashboardIcon = (props) => (
   </Svg>
 )
 
+export const CleanerIcon = (props) => (
+  <Svg {...props}>
+    <path d="M14.5 3.5 10 12" />
+    <path d="M7.2 11.2c1.9-.8 4.6.2 5.6 2.1l.7 1.4-7.3 3.6-.7-1.4c-1-1.9-.2-4.9 1.7-5.7Z" />
+    <path d="M6.2 16.9 4 20.5" />
+    <path d="M9 18.5 7.8 21" />
+    <path d="M18.5 9.5v3M17 11h3" />
+    <path d="M19.5 16v2M18.5 17h2" />
+  </Svg>
+)
+
 export const ScanIcon = (props) => (
   <Svg {...props}>
     <path d="M3 7V5a2 2 0 0 1 2-2h2" />

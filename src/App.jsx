@@ -9,6 +9,7 @@ import {
   SettingsIcon,
   UpdatesIcon,
   UserIcon,
+  CleanerIcon,
 } from './components/icons'
 import { useAegis } from './lib/useAegis'
 import { isLicensed, licenseBadge } from './lib/licensing'
@@ -20,11 +21,13 @@ import Protection from './views/Protection'
 import Updates from './views/Updates'
 import License from './views/License'
 import Settings from './views/Settings'
+import Cleaner from './views/Cleaner'
 
 const NAV = [
   ['dashboard', 'Dashboard', DashboardIcon, 'An overview of how this device is protected.'],
   ['scan', 'Scan', ScanIcon, 'Check files and folders against the signature set.'],
   ['quarantine', 'Quarantine', QuarantineIcon, 'Files that were isolated so they cannot run.'],
+  ['cleaner', 'PC Cleaner', CleanerIcon, 'Find and remove junk files that take up disk space.'],
   ['protection', 'Protection', ProtectionIcon, 'Real-time watching, removable drives and schedules.'],
   ['updates', 'Updates', UpdatesIcon, 'Threat definitions and application builds.'],
   ['license', 'Licence', LicenseIcon, 'Your account and this device’s licence.'],
@@ -195,6 +198,7 @@ function App() {
     dashboard: <Dashboard state={state} onQuickScan={quickScan} onToggleRealtime={toggleRealtime} onNavigate={go} firstScan={firstScan} />,
     scan: <Scan state={state} toasts={toasts} onNavigate={go} />,
     quarantine: <Quarantine state={state} toasts={toasts} />,
+    cleaner: <Cleaner state={state} toasts={toasts} onNavigate={go} />,
     protection: <Protection state={state} toasts={toasts} onNavigate={go} />,
     updates: <Updates state={state} toasts={toasts} />,
     license: <License state={state} toasts={toasts} onActivated={onActivated} onSignOut={() => setConfirmSignOut(true)} />,

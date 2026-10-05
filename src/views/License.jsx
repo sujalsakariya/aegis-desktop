@@ -51,9 +51,8 @@ function profileProblem(profile) {
 
 const EMPTY_PROFILE = { name: '', username: '', email: '', phone: '', licenseKey: '' }
 
-/** First problem with the returning-customer form (email + licence key), or null. */
+/** First problem with the returning-customer form (the licence key alone), or null. */
 function loginProblem(profile) {
-  if (!EMAIL_PATTERN.test(profile.email.trim())) return 'Enter the email you registered with.'
   return keyProblem(profile.licenseKey)
 }
 
@@ -135,7 +134,7 @@ function License({ state, toasts, onActivated, onSignOut }) {
     const email = profile.email.trim().toLowerCase()
     const key = profile.licenseKey.trim()
     const result = returning
-      ? await api.license.keyLogin(email, key)
+      ? await api.license.keyLogin('', key)
       : await api.license.signUp({ name: profile.name.trim(), username: profile.username.trim().toLowerCase(), email, phone: profile.phone.trim() }, key)
     setBusy('')
     if (result.ok) {
@@ -217,6 +216,13 @@ function License({ state, toasts, onActivated, onSignOut }) {
     }
   }
 
+  const keyField = (
+    <div className="field">
+      <label htmlFor="profile-licence-key">Licence key</label>
+      <input id="profile-licence-key" className="input mono" required value={profile.licenseKey} onChange={setField('licenseKey')} placeholder="AVP-XXXX-XXXX-XXXX-XXXX" spellCheck="false" autoComplete="off" />
+    </div>
+  )
+
   const accountCard = account ? (
     <Card
       title="Your details"
@@ -287,20 +293,19 @@ function License({ state, toasts, onActivated, onSignOut }) {
             <input id="profile-username" className="input" autoComplete="username" required value={profile.username} onChange={setField('username')} placeholder="e.g. john_pc" spellCheck="false" />
           </div>
         )}
-        <div className="field">
-          <label htmlFor="profile-email">Email</label>
-          <input id="profile-email" className="input" type="email" autoComplete="email" required value={profile.email} onChange={setField('email')} placeholder="john@example.com" />
-        </div>
+        {mode === 'new' && (
+          <div className="field">
+            <label htmlFor="profile-email">Email</label>
+            <input id="profile-email" className="input" type="email" autoComplete="email" required value={profile.email} onChange={setField('email')} placeholder="john@example.com" />
+          </div>
+        )}
         {mode === 'new' && (
           <div className="field">
             <label htmlFor="profile-phone">Phone (US)</label>
             <input id="profile-phone" className="input" type="tel" autoComplete="tel" required value={profile.phone} onChange={setField('phone')} placeholder="(212) 555-0123" />
           </div>
         )}
-        <div className="field">
-          <label htmlFor="profile-licence-key">Licence key</label>
-          <input id="profile-licence-key" className="input mono" required value={profile.licenseKey} onChange={setField('licenseKey')} placeholder="AVP-XXXX-XXXX-XXXX-XXXX" spellCheck="false" autoComplete="off" />
-        </div>
+        {keyField}
         {profileError && <div className="form-error">{profileError}</div>}
         <button type="submit" className="btn btn-primary btn-sm" disabled={busy === 'profile'}>
           <LicenseIcon size={15} />{' '}
@@ -310,7 +315,7 @@ function License({ state, toasts, onActivated, onSignOut }) {
         </button>
         <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>
           {mode === 'returning'
-            ? 'Enter the email you registered with and your licence key from your purchase email.'
+            ? 'Enter the licence key from your purchase email to log in.'
             : 'Your licence key is in your purchase email. Registered before, on this or another PC? Choose “I already have an account”.'}
         </p>
       </form>
@@ -358,7 +363,7 @@ function License({ state, toasts, onActivated, onSignOut }) {
               </p>
               <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.6 }}>
                 A licence key belongs to the first customer that activates it and works on one PC at a time. To move it to a new
-                PC, deactivate it here first, then log in on the new PC with your email and licence key.
+                PC, deactivate it here first, then log in on the new PC with your licence key.
               </p>
             </div>
           )}
@@ -403,7 +408,7 @@ function License({ state, toasts, onActivated, onSignOut }) {
       <ConfirmDialog
         open={confirmOff}
         title="Deactivate this device?"
-        body="The licence seat is released and protection turns off on this computer. You can then activate the same key on this PC, or on another PC by logging in there with your email and licence key. No other customer can use it."
+        body="The licence seat is released and protection turns off on this computer. You can then activate the same key on this PC, or on another PC by logging in there with your licence key. No other customer can use it."
         confirmLabel="Deactivate"
         onCancel={() => setConfirmOff(false)}
         onConfirm={() => {

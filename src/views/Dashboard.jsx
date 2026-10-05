@@ -96,7 +96,7 @@ function Dashboard({ state, onQuickScan, onToggleRealtime, onNavigate, firstScan
       : scanning
         ? 'Scanning your device…'
         : noSignatures
-          ? 'Install threat definitions, then scan your device.'
+          ? 'Download the threat signatures, then scan your device.'
           : needsRescan
             ? 'Scan your device to update your protection score.'
             : 'Scan your device to see your protection score.'
@@ -105,7 +105,7 @@ function Dashboard({ state, onQuickScan, onToggleRealtime, onNavigate, firstScan
     : scanning
       ? 'A scan is running right now.'
       : noSignatures
-        ? 'Install threat definitions to finish protecting your Device.'
+        ? 'Download the threat signatures to finish protecting your device.'
         : tone === 'ok'
         ? 'Your Device is in good condition.'
         : tone === 'warn'
@@ -129,7 +129,7 @@ function Dashboard({ state, onQuickScan, onToggleRealtime, onNavigate, firstScan
       {firstScan === 'preparing' && (
         <Banner tone="warn">
           <span className="dot warn" />
-          <p><strong>Getting ready for your first scan.</strong> Downloading the latest signed threat definitions…</p>
+          <p><strong>Getting ready for your first scan.</strong> Downloading the ClamAV threat signatures (about 110 MB, first time only)…</p>
         </Banner>
       )}
       {firstScan === 'running' && scanning && (
@@ -173,7 +173,7 @@ function Dashboard({ state, onQuickScan, onToggleRealtime, onNavigate, firstScan
                     {scanning ? 'Scan in progress' : hasScanned ? 'Run a quick scan' : 'Scan my device'}
                   </button>
                   {noSignatures ? (
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => onNavigate?.('updates')}>Get threat definitions</button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => onNavigate?.('updates')}>Get threat signatures</button>
                   ) : (
                     <button type="button" className="btn btn-ghost btn-sm" onClick={onToggleRealtime}>
                       {realtimeOn ? 'Pause real-time protection' : 'Turn on real-time protection'}

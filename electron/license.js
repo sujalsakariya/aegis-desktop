@@ -341,7 +341,8 @@ export class LicenseManager {
    * and `activationError` says why.
    */
   async keyLogin(email, licenseKey) {
-    return this.#keySession('/api/auth/key-login', { email }, licenseKey, 'Could not log in.')
+    // Email is optional: the key alone identifies its owner.
+    return this.#keySession('/api/auth/key-login', email ? { email } : {}, licenseKey, 'Could not log in.')
   }
 
   /**

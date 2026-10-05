@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "dist:win": "npm run build && electron-builder --win --publish never",
-    "dist:mac": "npm run build && electron-builder --mac --publish never"
+    "dist:win": "npm run fetch-engine && npm run build && electron-builder --win --publish never",
+    "dist:mac": "npm run fetch-engine && npm run build && electron-builder --mac --publish never",
+    "fetch-engine": "node scripts/fetch-clamav.mjs"
   },
   "keywords": [],
   "author": "",
@@ -72,6 +73,16 @@
     "dmg": {
       "artifactName": "${productName}-${version}-mac.${ext}",
       "title": "Aegis ${version}"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "vendor/clamav/${platform}",
+        "to": "clamav",
+        "filter": [
+          "**/*",
+          "!.version"
+        ]
+      }
+    ]
   }
 }
