@@ -76,8 +76,8 @@
     },
     "extraResources": [
       {
-        "from": "vendor/clamav/${platform}",
-        "to": "clamav",
+        "from": "vendor/engine/${platform}",
+        "to": "engine",
         "filter": [
           "**/*",
           "!.version"

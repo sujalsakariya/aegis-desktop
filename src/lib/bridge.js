@@ -80,6 +80,10 @@ export const scanner = {
   onUpdate: (listener) => subscribe('scannerAPI', listener),
 }
 
+export const app = {
+  openLicenses: () => call('appInfo', 'openLicenses'),
+}
+
 export const cleaner = {
   status: () => call('cleanerAPI', 'status'),
   analyze: () => call('cleanerAPI', 'analyze'),

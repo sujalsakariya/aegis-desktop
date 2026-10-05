@@ -102,6 +102,32 @@ export function KeyValue({ label, children }) {
  * shows that label instead ("Not scanned"), and `busy` makes it spin while the
  * first scan runs.
  */
+/** A small score gauge for one part of the protection (dashboard meters). */
+export function Meter({ label, score, tone, detail, actionLabel, onAction }) {
+  const radius = 26
+  const circumference = 2 * Math.PI * radius
+  const value = score === null ? 0 : Math.max(0, Math.min(100, score))
+  const stroke = tone === 'bad' ? 'var(--danger)' : tone === 'warn' ? 'var(--warn-dot)' : 'var(--brand-a)'
+  return (
+    <div className={`meter meter-${tone}`}>
+      <div className="meter-gauge" role="img" aria-label={score === null ? `${label}: not rated yet` : `${label}: ${value} out of 100`}>
+        <svg viewBox="0 0 64 64" aria-hidden="true">
+          <circle className="track" cx="32" cy="32" r={radius} />
+          {score !== null && (
+            <circle className="arc" cx="32" cy="32" r={radius} style={{ stroke }} strokeDasharray={circumference} strokeDashoffset={circumference * (1 - value / 100)} />
+          )}
+        </svg>
+        <strong>{score === null ? '—' : value}</strong>
+      </div>
+      <div className="meter-copy">
+        <span className="meter-label">{label}</span>
+        <span className="meter-detail">{detail}</span>
+        {actionLabel && <button type="button" className="btn btn-ghost btn-sm meter-action" onClick={onAction}>{actionLabel}</button>}
+      </div>
+    </div>
+  )
+}
+
 export function Shield({ score, tone = 'ok', pending = null, busy = false }) {
   const radius = 56
   const circumference = 2 * Math.PI * radius

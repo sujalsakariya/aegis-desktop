@@ -151,7 +151,7 @@ export class HistoryStore {
       sha256: release?.sha256 || null,
       signatureCount: Number.isFinite(signatureCount) ? signatureCount : null,
     }
-    this.#push('ok', `Signature definitions updated to ${release?.version || 'a new release'}.`)
+    this.#push('ok', `Threat signatures updated to version ${release?.version || 'a new release'}.`)
     await this.#save()
   }
 

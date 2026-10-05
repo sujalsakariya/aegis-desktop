@@ -8,9 +8,9 @@ import { formatCount, formatDateTime, timeAgo } from '../lib/format'
 function describe(event) {
   switch (event?.type) {
     case 'definitions-updated':
-      return ['ok', `Threat signatures updated to ${event.version}${Number.isFinite(event.signatureCount) ? ` (${formatCount(event.signatureCount)} signatures)` : ''}.`]
+      return ['ok', `Threat signatures updated to version ${event.version}${Number.isFinite(event.signatureCount) ? ` (${formatCount(event.signatureCount)} signatures)` : ''}.`]
     case 'definitions-current':
-      return ['ok', `Threat signatures ${event.version} are already the newest.`]
+      return ['ok', `Threat signatures version ${event.version} are already the newest.`]
     case 'definitions-failed':
       return ['bad', `Signature update failed. ${event.error || ''}`.trim()]
     case 'application-checked':
@@ -60,14 +60,14 @@ function Updates({ state, toasts }) {
       setDefinition(result.data)
       if (kind === 'definitions-check') {
         toasts.notify('Signatures checked', result.data?.upToDate
-          ? `You have the newest signatures (${result.data.installedVersion}).`
-          : `${result.data?.version} is available. Choose Update now.`)
+          ? `You have the newest signatures (version ${result.data.installedVersion}).`
+          : `Version ${result.data?.version} is available. Choose Update now.`)
       } else if (result.data?.alreadyInstalled) {
-        toasts.notify('Already up to date', `${result.data.version} is the newest. Nothing was downloaded.`)
+        toasts.notify('Already up to date', `Version ${result.data.version} is the newest. Nothing was downloaded.`)
       } else {
         refreshHistory()
         refreshDefinitions?.()
-        toasts.notify('Signatures updated', `${result.data?.version} is now active.`)
+        toasts.notify('Signatures updated', `Version ${result.data?.version} is now active.`)
       }
     }
   }
@@ -81,9 +81,9 @@ function Updates({ state, toasts }) {
       <Banner>
         <span className="dot ok" />
         <p>
-          Aegis scans with the ClamAV engine. Its threat signatures come straight from ClamAV’s official servers, are
-          digitally signed by ClamAV, and are checked before they are used. Aegis looks for new signatures when it starts and
-          every 6 hours.
+          Aegis scans with its built-in engine and 3.6 million threat signatures. Signatures come from official signature
+          servers, are digitally signed, and are checked before they are used. Aegis looks for new signatures when it starts
+          and every 6 hours.
         </p>
       </Banner>
 
@@ -100,23 +100,23 @@ function Updates({ state, toasts }) {
       )}
 
       <div className="grid two">
-        <Card title="Threat signatures" subtitle="ClamAV engine · official signatures">
+        <Card title="Threat signatures" subtitle="What the scanning engine recognises">
           {hasSignatures ? (
             <>
-              <KeyValue label="Engine">ClamAV {definitionInfo.engineRunning ? '(running)' : '(starts when needed)'}</KeyValue>
+              <KeyValue label="Scanning engine">{definitionInfo.engineRunning ? 'Running' : 'Starts when needed'}</KeyValue>
               <KeyValue label="Signature version">{definitionInfo.version}</KeyValue>
               <KeyValue label="Signatures">{formatCount(definitionInfo.count)}</KeyValue>
               {definitionInfo.updatedAt && <KeyValue label="Last updated">{formatDateTime(definitionInfo.updatedAt)}</KeyValue>}
             </>
           ) : (
             <Empty glyph="↻" title="Threat signatures are not downloaded yet">
-              Aegis downloads about 110 MB of ClamAV signatures the first time. Until then it cannot detect threats.
+              Aegis downloads about 110 MB of threat signatures the first time. Until then it cannot detect threats.
             </Empty>
           )}
 
           {available && !available.unknownLatest && (
             <div style={{ borderTop: '1px solid var(--line)', marginTop: 16, paddingTop: 12 }}>
-              <div className="section-title">Newest from ClamAV</div>
+              <div className="section-title">Newest available</div>
               <KeyValue label="Version">{available.version}</KeyValue>
               {available.publishedAt && <KeyValue label="Published">{formatDateTime(available.publishedAt)}</KeyValue>}
               {available.upToDate && <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>You already have these signatures.</p>}

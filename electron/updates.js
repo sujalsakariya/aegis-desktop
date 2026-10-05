@@ -33,12 +33,12 @@ async function readJson(response, what) {
   }
 }
 
-/** "daily 28143" style label for a ClamAV signature version. */
-function label(version) { return Number.isFinite(version) ? `ClamAV daily ${version}` : null }
+/** Signature set version as shown to the user ("28143"). */
+function label(version) { return Number.isFinite(version) ? String(version) : null }
 
 /**
- * Threat signatures come from ClamAV's official mirrors (via the bundled
- * engine's freshclam); application builds come from the Aegis server.
+ * Threat signatures come from the engine's official signature mirrors (via the
+ * bundled updater); application builds come from the Aegis server.
  * Event types stay the same as before: definitions-updated / -current / -failed.
  */
 export class UpdateManager {

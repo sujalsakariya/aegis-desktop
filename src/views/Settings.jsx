@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Banner, Card, Empty, KeyValue, SettingRow, Toggle } from '../components/ui'
+import * as api from '../lib/bridge'
 import { APP_VERSION } from '../lib/bridge'
 import { licenseBadge } from '../lib/licensing'
 
@@ -143,7 +144,6 @@ function Settings({ state, toasts }) {
 
       <Card title="About Aegis">
         <KeyValue label="Version">{APP_VERSION}</KeyValue>
-        <KeyValue label="Scanning engine">ClamAV 1.5.4</KeyValue>
         <KeyValue label="Threat signatures">
           {definitionInfo?.count
             ? `${definitionInfo.version ? `${definitionInfo.version} · ` : ''}${definitionInfo.count.toLocaleString('en-US')} signatures`
@@ -154,10 +154,10 @@ function Settings({ state, toasts }) {
           © {new Date().getFullYear()} Aegis. Updates for the app and threat signatures are on the Updates page.
         </p>
         <p className="muted" style={{ fontSize: 12, margin: '10px 0 0' }}>
-          Open-source software: Aegis includes ClamAV® 1.5.4 by Cisco Systems, Inc., licensed under the GNU General Public
-          License version 2. Its license is installed with Aegis (resources/clamav/COPYING), and the complete corresponding
-          source code is published with every Aegis release and at github.com/Cisco-Talos/clamav. ClamAV is a registered
-          trademark of Cisco Systems, Inc. Aegis is not affiliated with or endorsed by Cisco.
+          Aegis includes open-source software.{' '}
+          <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '2px 6px', fontSize: 12 }} onClick={() => api.app.openLicenses()}>
+            View open-source licenses
+          </button>
         </p>
       </Card>
 

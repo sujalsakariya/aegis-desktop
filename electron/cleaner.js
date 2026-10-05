@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { execFile } from 'node:child_process'
@@ -182,8 +183,16 @@ export class Cleaner {
   #protected
   #env
 
+  #statePath
+
   constructor({ env = process.env } = {}) {
     this.#env = env
+    // The last results survive a restart, so the dashboard can show how clean the PC is.
+    this.#statePath = path.join(app.getPath('userData'), 'cleaner.json')
+    try {
+      const saved = JSON.parse(readFileSync(this.#statePath, 'utf8'))
+      this.#status = { ...this.#status, analysis: saved.analysis || null, lastClean: saved.lastClean || null }
+    } catch { /* first run */ }
     // Aegis's own data: settings, history, quarantine, licence cache.
     this.#protected = [app.getPath('userData'), path.dirname(app.getPath('exe'))].map((dir) => path.resolve(dir))
   }
@@ -370,6 +379,7 @@ export class Cleaner {
   #finish(patch) {
     this.#busy = false
     this.#status = { ...this.#status, ...patch, state: 'idle', current: null, progress: null }
+    try { writeFileSync(this.#statePath, JSON.stringify({ analysis: this.#status.analysis, lastClean: this.#status.lastClean })) } catch { /* not critical */ }
     this.#publish()
   }
 

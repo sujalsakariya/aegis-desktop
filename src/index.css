@@ -627,3 +627,18 @@ button.account-chip { color: inherit; font: inherit; padding-right: 12px; }
 .cleaner-size { color: var(--text); font-family: var(--sans, inherit); font-size: 14px !important; margin-bottom: 2px; }
 .cleaner-actions { align-items: center; border-top: 1px solid var(--line); display: flex; gap: 16px; justify-content: space-between; padding: 16px 20px; }
 .cleaner-actions p { font-size: 13px; margin: 0; }
+
+/* ---------- Dashboard protection meters ---------- */
+.meter-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+.meter { align-items: flex-start; background: var(--bg-2); border: 1px solid var(--line); border-radius: 14px; display: flex; gap: 14px; padding: 14px; }
+.meter-gauge { display: grid; flex: 0 0 64px; height: 64px; place-items: center; position: relative; width: 64px; }
+.meter-gauge svg { height: 100%; inset: 0; position: absolute; transform: rotate(-90deg); width: 100%; }
+.meter-gauge .track { fill: none; stroke: var(--bg-3); stroke-width: 6; }
+.meter-gauge .arc { fill: none; stroke-linecap: round; stroke-width: 6; transition: stroke-dashoffset 1s var(--ease), stroke .4s; }
+.meter-gauge strong { font-size: 17px; font-weight: 650; letter-spacing: -.03em; position: relative; }
+.meter-off .meter-gauge strong { color: var(--text-dim); }
+.meter-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.meter-label { font-size: 13.5px; font-weight: 600; }
+.meter-detail { color: var(--text-dim); font-size: 12px; line-height: 1.45; }
+.meter-bad .meter-detail { color: var(--danger); }
+.meter-action { align-self: flex-start; margin-top: 6px; padding: 3px 10px; }

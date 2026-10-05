@@ -89,7 +89,7 @@ function Scan({ state, toasts, onNavigate }) {
       {active && (
         <Card title="Scan in progress" subtitle={`${titleCase(status.mode)} scan`}>
           <div className="progress indeterminate"><i /></div>
-          <div className="scan-file">{status.preparing ? 'Starting the scanning engine (loading 3.6 million ClamAV signatures, about 15 seconds)…' : status.currentFile ? shortPath(status.currentFile, 90) : 'Preparing…'}</div>
+          <div className="scan-file">{status.preparing ? 'Starting the scanning engine (loading 3.6 million threat signatures, about 15 seconds)…' : status.currentFile ? shortPath(status.currentFile, 90) : 'Preparing…'}</div>
           {status.threatsDetected > 0 && (
             <p className="muted" style={{ fontSize: 12.5, marginTop: 10 }}>
               {formatCount(status.threatsDetected)} threat(s) found so far, {formatCount(quarantinedCount)} moved to quarantine.

@@ -1,29 +1,15 @@
-import { useState } from 'react'
-import { Banner, Card, Empty, Shield, Stat } from '../components/ui'
+import { useEffect, useState } from 'react'
+import { Banner, Card, Empty, Meter, Shield, Stat } from '../components/ui'
 import { isLicensed } from '../lib/licensing'
+import { computeMeters, overallScore, toneOf } from '../lib/meters'
+import * as api from '../lib/bridge'
 import { formatCount, formatDate, formatDuration, shortPath, timeAgo, titleCase } from '../lib/format'
+
+/** Button text for each meter's fix-it action. */
+const ACTION_LABELS = { realtime: 'Turn on', scan: 'Scan now', updates: 'Update', protection: 'Review settings', cleaner: 'Check for junk', license: 'Activate' }
 
 /** Recent activity entries shown before "Show more". */
 const ACTIVITY_PREVIEW = 5
-
-/** Derives a 0-100 protection score from the live module states. */
-function computeScore({ settings, realtimeStatus, licenseStatus, quarantineCount, lastScanAt, signatureCount }) {
-  let score = 100
-  // Without signatures a scan cannot detect anything.
-  if (!signatureCount) score -= 30
-  if (!realtimeStatus?.running) score -= 28
-  if (!settings?.usbProtection) score -= 8
-  if (!settings?.automaticScanning) score -= 10
-  if (!settings?.updateChecks) score -= 6
-  if (!isLicensed(licenseStatus)) score -= 15
-  if (quarantineCount > 0) score -= Math.min(12, quarantineCount * 4)
-  if (!lastScanAt) score -= 12
-  else if (Date.now() - Date.parse(lastScanAt) > 14 * 86400000) score -= 10
-  // Without a licence nothing is actually protecting the device, whatever the
-  // settings say, so the score can never look healthy.
-  if (!isLicensed(licenseStatus)) score = Math.min(score, 25)
-  return Math.max(0, Math.min(100, Math.round(score)))
-}
 
 function ActivityChart({ data }) {
   const peak = Math.max(1, ...data.map((day) => day.filesScanned))
@@ -48,14 +34,28 @@ function ActivityChart({ data }) {
 function Dashboard({ state, onQuickScan, onToggleRealtime, onNavigate, firstScan }) {
   const { settings, realtimeStatus, usbStatus, licenseStatus, scannerStatus, quarantineItems, historySummary } = state
   const [showAllActivity, setShowAllActivity] = useState(false)
+  const [cleaner, setCleaner] = useState({})
+
+  // PC Cleaner's last analysis feeds the "PC cleanliness" meter.
+  useEffect(() => {
+    let alive = true
+    api.cleaner.status().then((result) => { if (alive && result.ok && result.data) setCleaner(result.data) })
+    const unsubscribe = api.cleaner.onUpdate((next) => { if (next) setCleaner(next) })
+    return () => { alive = false; unsubscribe() }
+  }, [])
 
   const licensed = isLicensed(licenseStatus)
   const realtimeOn = Boolean(realtimeStatus?.running)
   const scanning = scannerStatus?.state === 'running' || scannerStatus?.state === 'paused'
 
+  const runAction = (action) => {
+    if (action === 'realtime') onToggleRealtime?.()
+    else if (action === 'scan') onQuickScan?.()
+    else if (action) onNavigate?.(action)
+  }
+
   const totals = historySummary?.totals
   const lastScan = historySummary?.lastScan
-  const definitions = historySummary?.definitions
   const daily = historySummary?.daily || []
   const events = historySummary?.events || []
   const visibleEvents = showAllActivity ? events : events.slice(0, ACTIVITY_PREVIEW)
@@ -74,16 +74,18 @@ function Dashboard({ state, onQuickScan, onToggleRealtime, onNavigate, firstScan
   const hasScanned = licensed && Boolean(lastCompletedScanAt) && (!activatedAt || Date.parse(lastCompletedScanAt) >= Date.parse(activatedAt))
   const needsRescan = licensed && !hasScanned && Boolean(lastCompletedScanAt)
 
-  const score = computeScore({
+  const meters = computeMeters({
+    licensed,
     settings,
-    realtimeStatus,
-    licenseStatus,
-    quarantineCount: quarantineItems.length,
-    lastScanAt: lastCompletedScanAt,
-    signatureCount: state.definitionInfo?.count || 0,
+    realtimeRunning: realtimeOn,
+    usbSupported: usbStatus?.supported !== false,
+    signatures: { count: state.definitionInfo?.count || 0, updatedAt: state.definitionInfo?.updatedAt || null },
+    lastScanAt: hasScanned ? lastCompletedScanAt : null,
+    cleaner,
   })
+  const score = overallScore(meters) ?? 0
   const noSignatures = !state.definitionInfo?.count
-  const tone = score >= 80 ? 'ok' : score >= 55 ? 'warn' : 'bad'
+  const tone = toneOf(score)
   const pending = hasScanned ? null : !licensed ? 'No licence' : scanning ? 'Scanning' : needsRescan ? 'Scan needed' : 'Not scanned'
 
   // While a scan runs, its live counters are the truthful figure to show.
@@ -129,7 +131,7 @@ function Dashboard({ state, onQuickScan, onToggleRealtime, onNavigate, firstScan
       {firstScan === 'preparing' && (
         <Banner tone="warn">
           <span className="dot warn" />
-          <p><strong>Getting ready for your first scan.</strong> Downloading the ClamAV threat signatures (about 110 MB, first time only)…</p>
+          <p><strong>Getting ready for your first scan.</strong> Downloading the threat signatures (about 110 MB, first time only)…</p>
         </Banner>
       )}
       {firstScan === 'running' && scanning && (
@@ -190,6 +192,23 @@ function Dashboard({ state, onQuickScan, onToggleRealtime, onNavigate, firstScan
         </div>
       </section>
 
+
+      <Card title="Protection breakdown" subtitle="Each part of your protection, scored out of 100. The overall score combines them.">
+        <div className="meter-grid">
+          {meters.map((meter) => (
+            <Meter
+              key={meter.id}
+              label={meter.label}
+              score={meter.score}
+              tone={toneOf(meter.score)}
+              detail={meter.detail}
+              actionLabel={meter.action ? ACTION_LABELS[meter.action] : null}
+              onAction={() => runAction(meter.action)}
+            />
+          ))}
+        </div>
+      </Card>
+
       <div className="grid four">
         <Stat
           label="Files scanned"
@@ -207,9 +226,9 @@ function Dashboard({ state, onQuickScan, onToggleRealtime, onNavigate, firstScan
           note={quarantineItems.length === 0 ? 'Nothing isolated' : 'Isolated and encrypted'}
         />
         <Stat
-          label="Definitions"
-          value={definitions?.version || 'Not installed'}
-          note={definitions?.installedAt ? `Installed ${timeAgo(definitions.installedAt)}` : 'Install them from Updates'}
+          label="Threat signatures"
+          value={state.definitionInfo?.count ? `${(state.definitionInfo.count / 1e6).toFixed(2)}M` : 'Not yet'}
+          note={state.definitionInfo?.updatedAt ? `Updated ${timeAgo(state.definitionInfo.updatedAt)}` : 'Download them from Updates'}
         />
       </div>
 
@@ -232,15 +251,15 @@ function Dashboard({ state, onQuickScan, onToggleRealtime, onNavigate, firstScan
                   ['Real-time protection', realtimeOn, realtimeOn ? 'Watching file changes' : 'Currently off'],
                   ['Scheduled scans', Boolean(settings?.automaticScanning), settings?.automaticScanning ? 'Allowed to run on schedule' : 'Manual scans only'],
                   ['Removable drives', Boolean(usbStatus?.running), usbStatus?.supported === false ? 'Not supported on this platform' : usbStatus?.running ? `${usbStatus.devices?.length || 0} drive(s) seen` : 'Currently off'],
-                  ['Threat definitions', !noSignatures, noSignatures ? 'Not installed' : `${state.definitionInfo.count} signature(s) · v${state.definitionInfo.version || '?'}`],
-                  ['Update checks', Boolean(settings?.updateChecks), settings?.updateChecks ? 'Definitions kept current' : 'Currently off'],
+                  ['Threat signatures', !noSignatures, noSignatures ? 'Not downloaded yet' : `${formatCount(state.definitionInfo.count)} signatures · version ${state.definitionInfo.version || '?'}`],
+                  ['Update checks', Boolean(settings?.updateChecks), settings?.updateChecks ? 'Signatures kept current' : 'Currently off'],
                 ]
               : [
                   ['Licence', false, 'Not activated'],
                   ['Real-time protection', false, 'Needs an active licence'],
                   ['Scheduled scans', false, 'Needs an active licence'],
                   ['Removable drives', false, 'Needs an active licence'],
-                  ['Update checks', Boolean(settings?.updateChecks), settings?.updateChecks ? 'Definitions kept current' : 'Currently off'],
+                  ['Update checks', Boolean(settings?.updateChecks), settings?.updateChecks ? 'Signatures kept current' : 'Currently off'],
                 ]
             ).map(([label, on, note]) => (
               <div className="list-row" key={label} style={{ paddingInline: 0 }}>

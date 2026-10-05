@@ -31,6 +31,7 @@ export const SCAN_PARALLELISM = Math.max(2, Math.min(8, os.cpus().length))
 export class ClamEngine {
   #root
   #data
+  #legacyData
   #db
   #process = null
   #port = 0
@@ -47,14 +48,15 @@ export class ClamEngine {
   constructor({ resourcesDir, userData }) {
     // ClamAV insists on absolute paths for its certificate folder.
     this.#root = path.resolve(resourcesDir)
-    this.#data = path.join(userData, 'clamav')
+    this.#data = path.join(userData, 'engine')
+    this.#legacyData = path.join(userData, 'clamav')
     this.#db = path.join(this.#data, 'db')
   }
 
   get #bin() {
     return process.platform === 'win32'
-      ? { clamd: path.join(this.#root, 'clamd.exe'), freshclam: path.join(this.#root, 'freshclam.exe') }
-      : { clamd: path.join(this.#root, 'bin', 'clamd'), freshclam: path.join(this.#root, 'bin', 'freshclam') }
+      ? { clamd: path.join(this.#root, 'aegis-engine.exe'), freshclam: path.join(this.#root, 'aegis-updater.exe') }
+      : { clamd: path.join(this.#root, 'bin', 'aegis-engine'), freshclam: path.join(this.#root, 'bin', 'aegis-updater') }
   }
 
   /**
@@ -80,6 +82,8 @@ export class ClamEngine {
   #emit(event) { for (const listener of this.#listeners) { try { listener(event) } catch { /* ignore */ } } }
 
   async initialize() {
+    // Installs from before the rename keep their downloaded signatures.
+    if (!existsSync(this.#data) && existsSync(this.#legacyData)) await fs.rename(this.#legacyData, this.#data).catch(() => {})
     await fs.mkdir(this.#db, { recursive: true })
     await this.#killOrphan()
     await this.#readInfo()
@@ -166,7 +170,7 @@ export class ClamEngine {
       `TCPSocket ${this.#port}`,
       'TCPAddr 127.0.0.1',
       'Foreground yes',
-      `PidFile ${quote(path.join(this.#data, 'clamd.pid'))}`,
+      `PidFile ${quote(path.join(this.#data, 'engine.pid'))}`,
       `MaxThreads ${SCAN_PARALLELISM}`,
       // A reload would otherwise briefly hold two copies of the signatures.
       'ConcurrentDatabaseReload no',
@@ -223,15 +227,15 @@ export class ClamEngine {
   async #killOrphan() {
     // An earlier Aegis that crashed can leave its engine running; stop it.
     let pid
-    try { pid = Number((await fs.readFile(path.join(this.#data, 'clamd.pid'), 'utf8')).trim()) } catch { return }
+    try { pid = Number((await fs.readFile(path.join(this.#data, 'engine.pid'), 'utf8')).trim()) } catch { return }
     if (!Number.isInteger(pid) || pid <= 0) return
     try {
       const { stdout } = process.platform === 'win32'
         ? await execFileAsync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { windowsHide: true })
         : await execFileAsync('ps', ['-p', String(pid), '-o', 'comm='])
-      if (/clamd/i.test(stdout)) process.kill(pid)
+      if (/aegis-engine|clamd/i.test(stdout)) process.kill(pid)
     } catch { /* not running */ }
-    await fs.rm(path.join(this.#data, 'clamd.pid'), { force: true })
+    await fs.rm(path.join(this.#data, 'engine.pid'), { force: true })
   }
 
   /** Starts clamd if needed and resolves once it answers. Throws if signatures are missing. */
@@ -435,7 +439,7 @@ export class ClamEngine {
 function freshclamError(output) {
   const line = output.split(/\r?\n/).reverse().find((text) => /ERROR|WARNING/.test(text))
   if (!line) return null
-  if (/cool-?down|429/i.test(output)) return 'ClamAV asked us to wait before downloading again. Aegis will try again later.'
+  if (/cool-?down|429/i.test(output)) return 'The signature server asked Aegis to wait before downloading again. Aegis will try again later.'
   return `Signature update failed: ${line.replace(/^.*?(ERROR|WARNING):\s*/, '')}`
 }
 

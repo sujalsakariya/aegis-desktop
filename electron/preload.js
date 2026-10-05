@@ -4,6 +4,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 // No direct filesystem/OS access is exposed here — only what the
 // renderer explicitly needs, added deliberately as features are built.
 contextBridge.exposeInMainWorld('appInfo', {
+  openLicenses: () => ipcRenderer.invoke('app:openLicenses'),
   versions: {
     node: process.versions.node,
     chrome: process.versions.chrome,

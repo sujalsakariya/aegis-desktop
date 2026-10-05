@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme, Notification, Tray } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme, Notification, shell, Tray } from 'electron'
 import path from 'node:path'
 import { LicenseManager, LICENSED_STATES } from './license.js'
 import { Scanner } from './scanner.js'
@@ -29,10 +29,10 @@ let trayHintShown = false
 
 const licenseManager = new LicenseManager()
 const quarantine = new QuarantineManager()
-// ClamAV ships inside the app (extraResources); in development it comes from
-// vendor/clamav/<platform>, filled by `npm run fetch-engine`.
+// The scanning engine ships inside the app (extraResources); in development it
+// comes from vendor/engine/<platform>, filled by `npm run fetch-engine`.
 const engine = new ClamEngine({
-  resourcesDir: app.isPackaged ? path.join(process.resourcesPath, 'clamav') : path.join(app.getAppPath(), 'vendor', 'clamav', process.platform),
+  resourcesDir: app.isPackaged ? path.join(process.resourcesPath, 'engine') : path.join(app.getAppPath(), 'vendor', 'engine', process.platform),
   userData: app.getPath('userData'),
 })
 const scanner = new Scanner({ quarantine, engine })
@@ -342,6 +342,13 @@ function registerIpcHandlers() {
   ipcMain.handle('license:activate', handler((licenseKey) => licenseManager.activate(requireString(licenseKey, 'License key'))))
   ipcMain.handle('license:validate', handler(() => licenseManager.validate({ force: true })))
   ipcMain.handle('license:deactivate', handler(() => licenseManager.deactivate()))
+  ipcMain.handle('app:openLicenses', handler(async () => {
+    // GPL-2.0 license of the bundled scanning engine, installed with the app.
+    const folder = app.isPackaged ? path.join(process.resourcesPath, 'engine') : path.join(app.getAppPath(), 'vendor', 'engine', process.platform)
+    const error = await shell.openPath(path.join(folder, 'COPYING.txt'))
+    if (error) await shell.openPath(folder)
+    return true
+  }))
   ipcMain.handle('cleaner:status', handler(() => cleaner.getStatus()))
   ipcMain.handle('cleaner:analyze', handler(() => cleaner.analyze()))
   ipcMain.handle('cleaner:clean', handler(async (categoryIds) => {
@@ -351,7 +358,7 @@ function registerIpcHandlers() {
   }))
   ipcMain.handle('cleaner:cancel', handler(() => cleaner.cancel()))
   ipcMain.handle('scanner:status', handler(() => scanner.getStatus()))
-  ipcMain.handle('scanner:definitions', handler(() => ({ count: scanner.getDefinitionCount(), version: updates.getInstalled()?.version || null, updatedAt: engine.getInfo().updatedAt, engine: engine.isAvailable() ? 'ClamAV' : null, engineRunning: engine.isRunning() })))
+  ipcMain.handle('scanner:definitions', handler(() => ({ count: scanner.getDefinitionCount(), version: updates.getInstalled()?.version || null, updatedAt: engine.getInfo().updatedAt, engine: engine.isAvailable(), engineRunning: engine.isRunning() })))
   ipcMain.handle('scanner:start', handler((options) => scanner.start(scanOptions(options))))
   ipcMain.handle('scanner:pause', handler(() => scanner.pause()))
   ipcMain.handle('scanner:resume', handler(() => scanner.resume()))
