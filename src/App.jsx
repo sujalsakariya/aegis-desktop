@@ -12,6 +12,7 @@ import {
   CleanerIcon,
 } from './components/icons'
 import { useAegis } from './lib/useAegis'
+import markUrl from './assets/mark.png'
 import { isLicensed, licenseBadge } from './lib/licensing'
 import * as api from './lib/bridge'
 import Dashboard from './views/Dashboard'
@@ -209,8 +210,8 @@ function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="side-brand">
-          <span className="mark" aria-hidden="true"><span /></span>
-          <strong>Aegis<em>.</em></strong>
+          <img className="mark" src={markUrl} alt="" width="36" height="36" />
+          <strong>Aegis<small>Antivirus</small></strong>
         </div>
 
         <nav className="nav" aria-label="Sections">

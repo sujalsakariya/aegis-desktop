@@ -150,24 +150,10 @@ input, select { font: inherit; color: inherit; }
   width: 248px;
 }
 .side-brand { align-items: center; display: flex; gap: 11px; margin-bottom: 26px; padding-left: 6px; }
-.side-brand .mark {
-  background: var(--brand-fill);
-  border-radius: 9px;
-  box-shadow: 0 8px 18px -8px rgba(10, 125, 85, .7);
-  display: grid;
-  height: 32px;
-  place-items: center;
-  width: 32px;
-}
-.side-brand .mark span {
-  background: #fff;
-  clip-path: polygon(50% 4%, 92% 20%, 84% 66%, 50% 94%, 16% 66%, 8% 20%);
-  display: block;
-  height: 16px;
-  width: 15px;
-}
-.side-brand strong { font-size: 17px; font-weight: 600; letter-spacing: -.03em; }
-.side-brand em { color: var(--accent-ink); font-style: normal; }
+/* The shield from the Aegis logo, with the name beside it. */
+.side-brand .mark { display: block; filter: drop-shadow(0 5px 10px rgba(15, 40, 90, .28)); flex: none; height: 36px; object-fit: contain; width: 36px; }
+.side-brand strong { display: flex; flex-direction: column; font-size: 18px; font-weight: 700; letter-spacing: -.02em; line-height: 1; }
+.side-brand strong small { color: var(--text-dim); font-size: 8.5px; font-weight: 600; letter-spacing: .32em; margin-top: 4px; text-transform: uppercase; }
 
 .nav { display: flex; flex-direction: column; gap: 2px; }
 .nav-item {

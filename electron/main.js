@@ -17,6 +17,16 @@ process.env.APP_ROOT = path.join(__dirname, '..')
 export const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
 export const MAIN_DIST = path.join(process.env.APP_ROOT, 'dist-electron')
 export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
+// public/ is copied into dist/ by Vite; in development it is read directly.
+const BRAND_DIR = path.join(process.env.VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST, 'brand')
+
+/** The Aegis shield at a given size, with a sharper copy for high-DPI screens. */
+function brandIcon(size) {
+  const image = nativeImage.createFromPath(path.join(BRAND_DIR, `mark-${size}.png`))
+  const sharper = nativeImage.createFromPath(path.join(BRAND_DIR, `mark-${size * 2}.png`))
+  if (!image.isEmpty() && !sharper.isEmpty()) image.addRepresentation({ scaleFactor: 2, width: size, height: size, buffer: sharper.toPNG() })
+  return image
+}
 
 // Passed by the login item so a launch at sign-in starts quietly in the tray.
 const BACKGROUND_ARG = '--background'
@@ -129,7 +139,7 @@ function notify({ title, body, critical = false }) {
   if (current.dndMode && !critical) return
   if (!Notification.isSupported()) return
   try {
-    const notification = new Notification({ title, body, silent: false })
+    const notification = new Notification({ title, body, silent: false, icon: path.join(BRAND_DIR, 'mark-64.png') })
     notification.on('click', () => showWindow())
     notification.show()
   } catch { /* Notifications are best-effort. */ }
@@ -248,7 +258,8 @@ function quickScanFromTray() {
 function createTray() {
   if (tray || process.platform === 'darwin') return
   try {
-    tray = new Tray(trayIcon())
+    const logo = brandIcon(16)
+    tray = new Tray(logo.isEmpty() ? trayIcon() : logo)
     tray.setToolTip('Aegis Security')
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: 'Open Aegis', click: () => showWindow() },
@@ -276,7 +287,9 @@ function createWindow({ hidden = false } = {}) {
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    title: 'Aegis',
+    title: 'Aegis Antivirus',
+    // Taskbar/title-bar icon (the installed app also gets it from the .exe).
+    icon: path.join(BRAND_DIR, 'mark-256.png'),
     autoHideMenuBar: true,
     show: !hidden,
     webPreferences: {
